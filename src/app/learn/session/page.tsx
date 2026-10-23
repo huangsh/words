@@ -125,6 +125,8 @@ function SessionInner() {
     );
   }
 
+  if (!current) return <Loading text="正在生成闯关题目…" />;
+
   return (
     <div className="mx-auto flex min-h-dvh max-w-2xl flex-col px-4 pt-4 pb-6 safe-bottom">
       {/* 顶部进度条 */}
