@@ -1,10 +1,37 @@
 import type { DatabaseSync } from "node:sqlite";
 import { EMOJI, PEP_BOOK, PEP_UNITS, PHONETIC } from "./data/pep";
+import { EXAMPLES } from "./data/examples";
 
 export const SEED_KEY = "seed_pep_v2_2025";
+export const EXAMPLES_SEED_KEY = "seed_examples_v1";
+
+/** 补充现有单词的例句（如果缺失） */
+export function syncExamples(db: DatabaseSync) {
+  const done = db.prepare("SELECT value FROM settings WHERE key = ?").get(EXAMPLES_SEED_KEY);
+  if (done) return;
+
+  const updateStmt = db.prepare(
+    "UPDATE words SET example = ?, example_cn = ? WHERE text = ? AND (example = '' OR example IS NULL)",
+  );
+  db.exec("BEGIN");
+  try {
+    for (const [text, [ex, exCn]] of Object.entries(EXAMPLES)) {
+      updateStmt.run(ex, exCn, text);
+    }
+    db.prepare(
+      "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    ).run(EXAMPLES_SEED_KEY, new Date().toISOString());
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    console.error("Failed to sync examples:", e);
+  }
+}
 
 /** 首次启动或版本升级时写入/更新最新内置词库与默认标签 */
 export function seedBuiltinBooks(db: DatabaseSync) {
+  syncExamples(db);
+
   const done = db.prepare("SELECT value FROM settings WHERE key = ?").get(SEED_KEY);
   if (done) return;
 
@@ -38,7 +65,7 @@ export function seedBuiltinBooks(db: DatabaseSync) {
 
     const insUnit = db.prepare("INSERT INTO units(book_id, grade, term, name, sort) VALUES(?, ?, ?, ?, ?)");
     const insWord = db.prepare(
-      "INSERT INTO words(unit_id, text, meaning, phonetic, emoji, sort) VALUES(?, ?, ?, ?, ?, ?)",
+      "INSERT INTO words(unit_id, text, meaning, phonetic, emoji, example, example_cn, sort) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
     );
     const insWordTag = db.prepare("INSERT OR IGNORE INTO word_tags(word_id, tag_id) VALUES(?, ?)");
 
@@ -49,8 +76,9 @@ export function seedBuiltinBooks(db: DatabaseSync) {
         const text = pair.slice(0, idx).trim();
         const meaning = pair.slice(idx + 1).trim();
         if (!text) return;
+        const ex = EXAMPLES[text] ?? ["", ""];
         const wordId = Number(
-          insWord.run(unitId, text, meaning, PHONETIC[text] ?? "", EMOJI[text] ?? "", wi).lastInsertRowid,
+          insWord.run(unitId, text, meaning, PHONETIC[text] ?? "", EMOJI[text] ?? "", ex[0], ex[1], wi).lastInsertRowid,
         );
         if (text.includes(" ")) insWordTag.run(wordId, phraseTag.id);
       });

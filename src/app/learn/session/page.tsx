@@ -102,12 +102,13 @@ function SessionInner() {
 
   if (loading || !data) return <Loading text="正在生成闯关题目…" />;
   if (!data.words.length) {
-    if (mode === "spell") {
+    if (mode === "quiz" || mode === "listen") {
+      const modeName = mode === "quiz" ? "四选一闯关" : "听音选词";
       return (
         <div className="flex min-h-dvh flex-col items-center justify-center p-6 text-center">
-          <Empty icon="🔒" title="拼写挑战暂未解锁">
+          <Empty icon="🔒" title={`${modeName}暂未解锁`}>
             <p className="mt-2 max-w-sm text-sm text-ink-soft">
-              需要在单词完成「闪卡认词」、「四选一」或「听音选词」中任意一项认词成功后，才能开启拼写挑战哦！
+              需要在单词完成「闪卡认词」认词成功后，才能开启{modeName}哦！
             </p>
             <div className="mt-5 flex flex-col gap-3 sm:flex-row">
               <Button
@@ -125,6 +126,54 @@ function SessionInner() {
                 }}
               >
                 👉 先去闪卡认词
+              </Button>
+              <Button variant="secondary" onClick={() => router.push("/learn")}>
+                返回首页
+              </Button>
+            </div>
+          </Empty>
+        </div>
+      );
+    }
+    if (mode === "spell") {
+      return (
+        <div className="flex min-h-dvh flex-col items-center justify-center p-6 text-center">
+          <Empty icon="🔒" title="拼写挑战暂未解锁">
+            <p className="mt-2 max-w-sm text-sm text-ink-soft">
+              需要在单词完成「闪卡认词」以及「四选一闯关」或「听音选词」后，才能开启拼写挑战哦！
+            </p>
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+              <Button
+                variant="primary"
+                onClick={() => {
+                  const qs = new URLSearchParams({
+                    type,
+                    id,
+                    bookId,
+                    limit,
+                    mode: "quiz",
+                    title,
+                  });
+                  router.replace(`/learn/session?${qs.toString()}`);
+                }}
+              >
+                👉 去四选一闯关
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const qs = new URLSearchParams({
+                    type,
+                    id,
+                    bookId,
+                    limit,
+                    mode: "listen",
+                    title,
+                  });
+                  router.replace(`/learn/session?${qs.toString()}`);
+                }}
+              >
+                👉 去听音选词
               </Button>
               <Button variant="secondary" onClick={() => router.push("/learn")}>
                 返回首页
@@ -222,34 +271,53 @@ function FlashcardStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boo
           animate={{ rotateY: flipped ? 180 : 0 }}
           transition={{ type: "spring", stiffness: 260, damping: 24 }}
           style={{ transformStyle: "preserve-3d" }}
-          className="relative min-h-[340px] w-full sm:min-h-[380px]"
+          className="relative min-h-[360px] w-full sm:min-h-[400px]"
         >
           {/* 正面 */}
-          <div className="card-soft backface-hidden absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
-            {word.emoji && <div className="mb-3 text-6xl">{word.emoji}</div>}
+          <div className="card-soft backface-hidden absolute inset-0 flex flex-col items-center justify-center p-6 text-center sm:p-8">
+            {word.emoji && <div className="mb-2 text-5xl sm:text-6xl">{word.emoji}</div>}
             <div className="font-word text-4xl font-black tracking-wide sm:text-5xl">{word.text}</div>
-            {word.phonetic && <div className="mt-2 text-lg text-ink-soft">{word.phonetic}</div>}
+            {word.phonetic && <div className="mt-1.5 text-base sm:text-lg text-ink-soft">{word.phonetic}</div>}
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 speak(word.text);
               }}
-              className="mt-6 flex items-center gap-2 rounded-2xl bg-brand-50 px-5 py-2.5 text-sm font-extrabold text-brand-600 hover:bg-brand-100"
+              className="mt-4 flex items-center gap-2 rounded-2xl bg-brand-50 px-5 py-2 text-sm font-extrabold text-brand-600 hover:bg-brand-100 transition"
             >
-              <Volume2 size={20} /> 点我读一读
+              <Volume2 size={18} /> 点我读一读
             </button>
-            <div className="mt-8 text-xs font-semibold text-ink-soft">👆 点击卡片翻转看中文意思</div>
+
+            {/* 点我读一读下方 显示简单的例句 */}
+            {word.example && (
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  speak(word.example);
+                }}
+                className="mt-3.5 max-w-sm rounded-2xl bg-slate-50/90 px-4 py-2.5 text-center transition hover:bg-brand-50/80 cursor-pointer border border-slate-100"
+                title="点击朗读例句"
+              >
+                <div className="font-word font-bold text-ink flex items-center justify-center gap-1.5 text-sm sm:text-base">
+                  <span>{word.example}</span>
+                  <Volume2 size={15} className="text-brand-500 shrink-0" />
+                </div>
+                {word.example_cn && <div className="mt-1 text-xs text-ink-soft">{word.example_cn}</div>}
+              </div>
+            )}
+
+            <div className="mt-4 text-xs font-semibold text-ink-soft">👆 点击卡片翻转看中文意思</div>
           </div>
 
           {/* 背面 */}
           <div
             style={{ transform: "rotateY(180deg)" }}
-            className="card-soft backface-hidden absolute inset-0 flex flex-col items-center justify-center p-8 text-center"
+            className="card-soft backface-hidden absolute inset-0 flex flex-col items-center justify-center p-6 text-center sm:p-8"
           >
             {word.emoji && <div className="mb-2 text-5xl">{word.emoji}</div>}
             <div className="font-word text-3xl font-black text-brand-600">{word.text}</div>
-            <div className="mt-3 text-2xl font-extrabold">
+            <div className="mt-2 text-2xl font-extrabold">
               {word.pos && <span className="mr-1.5 text-base text-ink-soft italic">{word.pos}</span>}
               {word.meaning}
             </div>
@@ -259,9 +327,13 @@ function FlashcardStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boo
                   e.stopPropagation();
                   speak(word.example);
                 }}
-                className="mt-5 max-w-md rounded-2xl bg-slate-50 p-4 text-sm"
+                className="mt-4 max-w-sm rounded-2xl bg-slate-50/90 px-4 py-2.5 text-center transition hover:bg-brand-50/80 cursor-pointer border border-slate-100"
+                title="点击朗读例句"
               >
-                <div className="font-word font-bold text-ink">{word.example} 🔊</div>
+                <div className="font-word font-bold text-ink flex items-center justify-center gap-1.5 text-sm sm:text-base">
+                  <span>{word.example}</span>
+                  <Volume2 size={15} className="text-brand-500 shrink-0" />
+                </div>
                 {word.example_cn && <div className="mt-1 text-xs text-ink-soft">{word.example_cn}</div>}
               </div>
             )}
@@ -403,28 +475,21 @@ function QuizStep({
   );
 }
 
-/* ────────────────────── 4. 拼写挑战（字母块点选 + 支持键盘） ────────────────────── */
+/* ────────────────────── 4. 拼写挑战（全键盘 26 字母输入 + 支持物理键盘） ────────────────────── */
+const KEYBOARD_ROWS = [
+  ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+  ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
+  ["z", "x", "c", "v", "b", "n", "m"],
+];
+
 function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean) => void }) {
   // 只对英文字母挖空，空格和标点固定保留
   const chars = useMemo(() => word.text.split(""), [word.text]);
   const letterIndices = useMemo(() => chars.map((c, i) => (/[A-Za-z]/.test(c) ? i : -1)).filter((i) => i >= 0), [chars]);
 
-  const tiles = useMemo(() => {
-    const base = letterIndices.map((idx, pos) => ({ id: pos, ch: chars[idx] }));
-    // 加 2 个干扰字母
-    const alphabet = "abcdefghijklmnopqrstuvwxyz";
-    for (let k = 0; k < 2; k++) {
-      base.push({ id: base.length + k, ch: alphabet[Math.floor(Math.random() * 26)] });
-    }
-    for (let i = base.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [base[i], base[j]] = [base[j], base[i]];
-    }
-    return base;
-  }, [chars, letterIndices]);
-
-  const [pickedTiles, setPickedTiles] = useState<number[]>([]);
+  const [input, setInput] = useState<string[]>([]);
   const [status, setStatus] = useState<"typing" | "correct" | "wrong">("typing");
+  const [uppercase, setUppercase] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => speak(word.text), 180);
@@ -432,41 +497,39 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
   }, [word.text]);
 
   const checkResult = useCallback(
-    (nextPicked: number[]) => {
-      if (nextPicked.length < letterIndices.length) return;
-      const attempt = nextPicked.map((tid) => tiles.find((t) => t.id === tid)!.ch).join("");
+    (nextInput: string[]) => {
+      if (nextInput.length < letterIndices.length) return;
+      const attempt = nextInput.join("");
       const target = letterIndices.map((i) => chars[i]).join("");
       const ok = attempt.toLowerCase() === target.toLowerCase();
       setStatus(ok ? "correct" : "wrong");
       speak(word.text);
       setTimeout(() => onAnswer(ok), ok ? 750 : 1600);
     },
-    [chars, letterIndices, onAnswer, tiles, word.text],
+    [chars, letterIndices, onAnswer, word.text],
   );
 
-  const tapTile = useCallback(
-    (id: number) => {
-      if (status !== "typing" || pickedTiles.includes(id) || pickedTiles.length >= letterIndices.length) return;
+  const tapChar = useCallback(
+    (ch: string) => {
+      if (status !== "typing" || input.length >= letterIndices.length) return;
       sfx("tap");
-      const next = [...pickedTiles, id];
-      setPickedTiles(next);
+      const next = [...input, ch];
+      setInput(next);
       checkResult(next);
     },
-    [checkResult, letterIndices.length, pickedTiles, status],
+    [checkResult, input, letterIndices.length, status],
   );
 
   const backspace = useCallback(() => {
-    if (status !== "typing" || !pickedTiles.length) return;
-    setPickedTiles((p) => p.slice(0, -1));
-  }, [pickedTiles.length, status]);
+    if (status !== "typing" || !input.length) return;
+    setInput((p) => p.slice(0, -1));
+  }, [input.length, status]);
 
-  const hint = () => {
-    if (status !== "typing" || pickedTiles.length >= letterIndices.length) return;
-    const nextCharIdx = letterIndices[pickedTiles.length];
-    const needed = chars[nextCharIdx].toLowerCase();
-    const tile = tiles.find((t) => !pickedTiles.includes(t.id) && t.ch.toLowerCase() === needed);
-    if (tile) tapTile(tile.id);
-  };
+  const hint = useCallback(() => {
+    if (status !== "typing" || input.length >= letterIndices.length) return;
+    const nextTargetChar = chars[letterIndices[input.length]];
+    tapChar(nextTargetChar.toLowerCase());
+  }, [chars, input.length, letterIndices, status, tapChar]);
 
   // 支持外接键盘直接输入
   useEffect(() => {
@@ -476,16 +539,17 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
         e.preventDefault();
         backspace();
       } else if (/^[a-zA-Z]$/.test(e.key)) {
-        const tile = tiles.find((t) => !pickedTiles.includes(t.id) && t.ch.toLowerCase() === e.key.toLowerCase());
-        if (tile) tapTile(tile.id);
+        if (input.length < letterIndices.length) {
+          tapChar(e.key.toLowerCase());
+        }
       }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [backspace, pickedTiles, status, tapTile, tiles]);
+  }, [backspace, input.length, letterIndices.length, status, tapChar]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="card-soft flex flex-col items-center p-7 text-center">
         {word.emoji && <div className="mb-2 text-5xl">{word.emoji}</div>}
         <div className="flex items-center gap-2 text-2xl font-extrabold">
@@ -509,13 +573,16 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
                 </span>
               );
             }
-            const tileId = pickedTiles[slotPos];
-            const filled = tileId !== undefined ? tiles.find((t) => t.id === tileId)?.ch : "";
+            const filled = input[slotPos] || "";
+            const isCurrentSlot = status === "typing" && slotPos === input.length;
             return (
               <button
                 key={idx}
+                type="button"
                 onClick={() => {
-                  if (status === "typing" && slotPos === pickedTiles.length - 1) backspace();
+                  if (status === "typing" && slotPos < input.length) {
+                    setInput((prev) => prev.slice(0, slotPos));
+                  }
                 }}
                 className={`font-word flex h-12 w-10 items-center justify-center rounded-xl border-b-4 text-2xl font-black transition sm:h-14 sm:w-12 ${
                   status === "correct"
@@ -524,10 +591,12 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
                       ? "border-coral-600 bg-coral-500 text-white"
                       : filled
                         ? "border-brand-500 bg-brand-50 text-brand-600"
-                        : "border-slate-300 bg-slate-100"
+                        : isCurrentSlot
+                          ? "border-brand-300 bg-brand-50/50 ring-2 ring-brand-300 ring-offset-1"
+                          : "border-slate-300 bg-slate-100"
                 }`}
               >
-                {filled}
+                {status === "correct" ? chars[idx] : filled}
               </button>
             );
           })}
@@ -538,34 +607,97 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
         )}
       </div>
 
-      {/* 字母块键盘 */}
-      <div className="flex flex-wrap justify-center gap-2.5">
-        {tiles.map((t) => {
-          const used = pickedTiles.includes(t.id);
-          return (
+      {/* 26 键键盘区域 */}
+      <div className="mx-auto w-full max-w-lg space-y-1.5 px-1 select-none">
+        {/* 第一行 Q-P (10 键) */}
+        <div className="flex justify-center gap-1 sm:gap-1.5">
+          {KEYBOARD_ROWS[0].map((ch) => (
             <motion.button
-              key={t.id}
-              whileTap={!used ? { scale: 0.9 } : undefined}
-              disabled={used || status !== "typing"}
-              onClick={() => tapTile(t.id)}
-              className={`btn-3d font-word flex h-14 w-14 items-center justify-center rounded-2xl text-2xl font-black transition ${
-                used ? "bg-slate-200 text-transparent opacity-40" : "border-2 border-slate-200 bg-white text-ink"
-              }`}
+              key={ch}
+              type="button"
+              whileTap={{ scale: 0.92 }}
+              disabled={status !== "typing" || input.length >= letterIndices.length}
+              onClick={() => tapChar(ch)}
+              className="btn-3d font-word flex h-11 sm:h-13 flex-1 max-w-11 sm:max-w-12 items-center justify-center rounded-xl sm:rounded-2xl border-2 border-slate-200 bg-white text-lg sm:text-2xl font-black text-ink active:translate-y-0.5 disabled:opacity-50"
               style={{ ["--shadow-color" as string]: "#cbd5e1" }}
             >
-              {t.ch}
+              {uppercase ? ch.toUpperCase() : ch}
             </motion.button>
-          );
-        })}
-      </div>
+          ))}
+        </div>
 
-      <div className="flex justify-center gap-3">
-        <Button variant="secondary" size="md" onClick={hint} disabled={status !== "typing"}>
-          <HelpCircle size={18} /> 提示一个字母
-        </Button>
-        <Button variant="secondary" size="md" onClick={backspace} disabled={status !== "typing" || !pickedTiles.length}>
-          <Delete size={18} /> 退格
-        </Button>
+        {/* 第二行 A-L (9 键，居中对齐) */}
+        <div className="flex justify-center gap-1 sm:gap-1.5 px-3 sm:px-4">
+          {KEYBOARD_ROWS[1].map((ch) => (
+            <motion.button
+              key={ch}
+              type="button"
+              whileTap={{ scale: 0.92 }}
+              disabled={status !== "typing" || input.length >= letterIndices.length}
+              onClick={() => tapChar(ch)}
+              className="btn-3d font-word flex h-11 sm:h-13 flex-1 max-w-11 sm:max-w-12 items-center justify-center rounded-xl sm:rounded-2xl border-2 border-slate-200 bg-white text-lg sm:text-2xl font-black text-ink active:translate-y-0.5 disabled:opacity-50"
+              style={{ ["--shadow-color" as string]: "#cbd5e1" }}
+            >
+              {uppercase ? ch.toUpperCase() : ch}
+            </motion.button>
+          ))}
+        </div>
+
+        {/* 第三行 提示 + Z-M (7 键) + 退格 */}
+        <div className="flex justify-center gap-1 sm:gap-1.5">
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.92 }}
+            disabled={status !== "typing" || input.length >= letterIndices.length}
+            onClick={hint}
+            className="btn-3d flex h-11 sm:h-13 flex-[1.4] max-w-16 sm:max-w-20 items-center justify-center gap-1 rounded-xl sm:rounded-2xl border-2 border-amber-200 bg-amber-50 text-xs sm:text-sm font-black text-amber-700 active:translate-y-0.5 disabled:opacity-40"
+            style={{ ["--shadow-color" as string]: "#fde68a" }}
+            title="提示一个字母"
+          >
+            <HelpCircle size={16} />
+            <span>提示</span>
+          </motion.button>
+
+          {KEYBOARD_ROWS[2].map((ch) => (
+            <motion.button
+              key={ch}
+              type="button"
+              whileTap={{ scale: 0.92 }}
+              disabled={status !== "typing" || input.length >= letterIndices.length}
+              onClick={() => tapChar(ch)}
+              className="btn-3d font-word flex h-11 sm:h-13 flex-1 max-w-11 sm:max-w-12 items-center justify-center rounded-xl sm:rounded-2xl border-2 border-slate-200 bg-white text-lg sm:text-2xl font-black text-ink active:translate-y-0.5 disabled:opacity-50"
+              style={{ ["--shadow-color" as string]: "#cbd5e1" }}
+            >
+              {uppercase ? ch.toUpperCase() : ch}
+            </motion.button>
+          ))}
+
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.92 }}
+            disabled={status !== "typing" || !input.length}
+            onClick={backspace}
+            className="btn-3d flex h-11 sm:h-13 flex-[1.4] max-w-16 sm:max-w-20 items-center justify-center gap-1 rounded-xl sm:rounded-2xl border-2 border-slate-200 bg-slate-100 text-xs sm:text-sm font-black text-ink-soft active:translate-y-0.5 disabled:opacity-40"
+            style={{ ["--shadow-color" as string]: "#cbd5e1" }}
+            title="退格删除"
+          >
+            <Delete size={18} />
+            <span>退格</span>
+          </motion.button>
+        </div>
+
+        {/* 底部辅助栏 */}
+        <div className="flex items-center justify-between px-2 pt-1 text-xs text-ink-soft">
+          <button
+            type="button"
+            onClick={() => setUppercase((v) => !v)}
+            className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 font-bold text-ink shadow-sm hover:bg-slate-50 transition"
+          >
+            <span>键盘大小写：</span>
+            <span className="font-word text-brand-600 font-black">{uppercase ? "大写 (A-Z)" : "小写 (a-z)"}</span>
+          </button>
+          <span className="text-[11px] sm:text-xs">支持直接使用电脑键盘输入</span>
+        </div>
       </div>
     </div>
   );

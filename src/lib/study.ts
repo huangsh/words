@@ -17,6 +17,9 @@ export interface WordRow {
   example_cn: string;
   emoji: string;
   box?: number;
+  flashcard_done?: number;
+  quiz_done?: number;
+  listen_done?: number;
   spell_eligible?: number;
 }
 
@@ -31,20 +34,35 @@ export function recordAnswer(userId: number, wordId: number, mode: string, corre
       correct ? 1 : 0,
     );
     if (!updateBox) return null;
-    const p = db.prepare("SELECT box FROM progress WHERE user_id = ? AND word_id = ?").get(userId, wordId) as
-      | { box: number }
+    const p = db.prepare("SELECT box, wrong FROM progress WHERE user_id = ? AND word_id = ?").get(userId, wordId) as
+      | { box: number; wrong: number }
       | undefined;
     const oldBox = p?.box ?? 0;
+    const oldWrong = p?.wrong ?? 0;
     const box = correct ? Math.min(oldBox + 1, MASTERED_BOX) : 1;
     // 答错：10 分钟后可再复习；答对：按盒子间隔推迟
     const offset = correct ? `+${INTERVAL_DAYS[box]} days` : "+10 minutes";
+
+    // 错题本规则：只针对「拼写挑战」中拼写错误的单词，其他练习（闪卡认词、四选一、听音选词）不计入错题本
+    let wrongChange = 0;
+    if (mode === "spell") {
+      if (!correct) {
+        wrongChange = 1; // 拼写挑战答错，计入错题本
+      } else if (oldWrong > 0) {
+        wrongChange = -1; // 拼写挑战重新拼对，从错题本消灭
+      }
+    }
+    const initWrong = mode === "spell" && !correct ? 1 : 0;
+
     db.prepare(
       `INSERT INTO progress(user_id, word_id, box, next_review_at, correct, wrong, last_seen_at)
        VALUES(?, ?, ?, datetime('now', ?), ?, ?, datetime('now'))
        ON CONFLICT(user_id, word_id) DO UPDATE SET
          box = excluded.box, next_review_at = excluded.next_review_at,
-         correct = correct + excluded.correct, wrong = wrong + excluded.wrong, last_seen_at = excluded.last_seen_at`,
-    ).run(userId, wordId, box, offset, correct ? 1 : 0, correct ? 0 : 1);
+         correct = correct + excluded.correct,
+         wrong = MAX(0, wrong + ?),
+         last_seen_at = excluded.last_seen_at`,
+    ).run(userId, wordId, box, offset, correct ? 1 : 0, initWrong, wrongChange);
     return box;
   });
 }
@@ -60,7 +78,11 @@ function shuffle<T>(arr: T[]): T[] {
 
 export type ScopeType = "unit" | "tag" | "review" | "wrong" | "grade";
 
-/** 生成学习队列：优先到期复习词，其次新词，最后未掌握的词；拼写模式仅纳入已完成闪卡/选择/听音的词 */
+/** 生成学习队列：
+ * 阶段 1：闪卡认词（无门槛，直接开放）
+ * 阶段 2：四选一闯关 / 听音选词（需先完成闪卡认词）
+ * 阶段 3：拼写挑战（需四选一与听音选词 2 个都完成后才开放）
+ */
 export function buildQueue(
   userId: number,
   type: ScopeType,
@@ -71,7 +93,7 @@ export function buildQueue(
 ) {
   const db = getDb();
   let where = "";
-  const args: (string | number)[] = [userId, userId];
+  const args: (string | number)[] = [userId, userId, userId, userId];
   let join = "";
 
   switch (type) {
@@ -95,7 +117,7 @@ export function buildQueue(
       where = "p.word_id IS NOT NULL AND p.next_review_at <= datetime('now')";
       break;
     case "wrong":
-      where = "p.wrong > 0 AND p.box < 3";
+      where = "p.wrong > 0";
       break;
   }
 
@@ -108,23 +130,58 @@ export function buildQueue(
               EXISTS (
                 SELECT 1 FROM study_logs sl
                 WHERE sl.user_id = ? AND sl.word_id = w.id
-                  AND sl.mode IN ('flashcard', 'quiz', 'listen')
+                  AND sl.mode = 'flashcard'
                   AND sl.correct = 1
-              ) AS spell_eligible
+              ) AS flashcard_done,
+              EXISTS (
+                SELECT 1 FROM study_logs sl
+                WHERE sl.user_id = ? AND sl.word_id = w.id
+                  AND sl.mode = 'quiz'
+                  AND sl.correct = 1
+              ) AS quiz_done,
+              EXISTS (
+                SELECT 1 FROM study_logs sl
+                WHERE sl.user_id = ? AND sl.word_id = w.id
+                  AND sl.mode = 'listen'
+                  AND sl.correct = 1
+              ) AS listen_done
        FROM words w ${join}
        LEFT JOIN progress p ON p.word_id = w.id AND p.user_id = ?
        WHERE ${where}
        ORDER BY pri, p.next_review_at, w.sort, w.id`,
     )
-    .all(...args) as unknown as (WordRow & { pri: number; spell_eligible: number })[];
+    .all(...args) as unknown as (WordRow & {
+      pri: number;
+      flashcard_done: number;
+      quiz_done: number;
+      listen_done: number;
+    })[];
 
-  const spellCount = rows.filter((r) => Number(r.spell_eligible) === 1).length;
-  const candidateRows = mode === "spell" ? rows.filter((r) => Number(r.spell_eligible) === 1) : rows;
+  const flashcardCount = rows.filter((r) => Number(r.flashcard_done) === 1).length;
+  const quizCount = rows.filter((r) => Number(r.quiz_done) === 1).length;
+  const listenCount = rows.filter((r) => Number(r.listen_done) === 1).length;
+  // 拼写挑战解锁条件：先完成闪卡认词，且完成（四选一闯关 或 听音选词）中任意一项（共完成 2 个阶段）
+  const spellCount = rows.filter(
+    (r) => Number(r.flashcard_done) === 1 && (Number(r.quiz_done) === 1 || Number(r.listen_done) === 1),
+  ).length;
+
+  let candidateRows = rows;
+  if (mode === "quiz" || mode === "listen") {
+    // 四选一或听音选词：需先完成闪卡认词
+    candidateRows = rows.filter((r) => Number(r.flashcard_done) === 1);
+  } else if (mode === "spell") {
+    // 拼写挑战：需完成闪卡 + （四选一 或 听音选词）2 个阶段
+    candidateRows = rows.filter(
+      (r) => Number(r.flashcard_done) === 1 && (Number(r.quiz_done) === 1 || Number(r.listen_done) === 1),
+    );
+  }
 
   const picked = candidateRows.slice(0, limit);
-  const words = shuffle(picked).map(({ pri, spell_eligible, ...w }) => {
+  const words = shuffle(picked).map(({ pri, flashcard_done, quiz_done, listen_done, ...w }) => {
     void pri;
-    void spell_eligible;
+    void flashcard_done;
+    void quiz_done;
+    void listen_done;
     return w;
   });
 
@@ -144,8 +201,14 @@ export function buildQueue(
     words,
     pool,
     total: candidateRows.length,
-    spellCount,
     scopeTotal: rows.length,
+    flashcardCount,
+    quizCount,
+    listenCount,
+    quizUnlockedCount: flashcardCount,
+    listenUnlockedCount: flashcardCount,
+    spellUnlockedCount: spellCount,
+    spellCount,
   };
 }
 
@@ -176,7 +239,7 @@ export function todayStats(userId: number) {
   const review = db
     .prepare("SELECT COUNT(*) AS c FROM progress WHERE user_id = ? AND next_review_at <= datetime('now')")
     .get(userId) as { c: number };
-  const wrong = db.prepare("SELECT COUNT(*) AS c FROM progress WHERE user_id = ? AND wrong > 0 AND box < 3").get(
+  const wrong = db.prepare("SELECT COUNT(*) AS c FROM progress WHERE user_id = ? AND wrong > 0").get(
     userId,
   ) as { c: number };
   const learned = db.prepare("SELECT COUNT(*) AS c, COALESCE(SUM(box >= ?),0) AS m FROM progress WHERE user_id = ?").get(

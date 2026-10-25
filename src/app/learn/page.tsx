@@ -35,6 +35,11 @@ interface WordItem {
   phonetic: string;
   emoji: string;
   box: number;
+  flashcard_done?: boolean;
+  quiz_done?: boolean;
+  listen_done?: boolean;
+  quiz_unlocked?: boolean;
+  listen_unlocked?: boolean;
   spell_unlocked?: boolean;
 }
 
@@ -58,10 +63,18 @@ export default function LearnHomePage() {
   const [previewUnit, setPreviewUnit] = useState<Unit | null>(null);
   const unitWordsQ = useApi<{ words: WordItem[] }>(previewUnit ? `/api/words?unitId=${previewUnit.id}` : null);
 
-  const spellInfoQ = useApi<{ total: number; spellCount: number; scopeTotal: number }>(
-    scope ? `/api/study/queue?type=${scope.type}&id=${scope.id ?? ""}&bookId=${bookId ?? ""}&limit=1&mode=spell` : null,
+  const scopeInfoQ = useApi<{
+    total: number;
+    scopeTotal: number;
+    flashcardCount: number;
+    quizCount: number;
+    listenCount: number;
+    quizUnlockedCount: number;
+    listenUnlockedCount: number;
+    spellUnlockedCount: number;
+  }>(
+    scope ? `/api/study/queue?type=${scope.type}&id=${scope.id ?? ""}&bookId=${bookId ?? ""}&limit=1` : null,
   );
-  const unlockedSpellCount = spellInfoQ.data?.total ?? 0;
 
   useEffect(() => {
     if (!bookId && booksQ.data?.books.length) setBookId(booksQ.data.books[0].id);
@@ -317,32 +330,96 @@ export default function LearnHomePage() {
 
       {/* 选择学习模式弹窗 */}
       <Modal open={!!scope} onClose={() => setScope(null)} title={scope?.title}>
-        <p className="mb-4 text-sm text-ink-soft">共 {scope?.count} 个单词，选一种喜欢的方式开始吧：</p>
+        <p className="mb-4 text-sm text-ink-soft">
+          共 {scope?.count} 个单词，按「闪卡认词 ➔ 闯关/听音 ➔ 拼写挑战」循序渐进：
+        </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {MODES.map((m) => {
             const Icon = m.icon;
-            const isSpell = m.key === "spell";
-            const isLocked = isSpell && !spellInfoQ.loading && spellInfoQ.data !== undefined && unlockedSpellCount === 0;
+            const info = scopeInfoQ.data;
+            const loading = scopeInfoQ.loading;
+
+            let isLocked = false;
+            let lockMsg = "";
+            let targetCount = scope?.count || 20;
+            let desc = m.desc;
+
+            if (m.key === "flashcard") {
+              // 阶段 1：闪卡认词（直接开放）
+              isLocked = false;
+              if (info) {
+                desc =
+                  info.flashcardCount >= info.scopeTotal
+                    ? `✅ 已认全全部 ${info.scopeTotal} 词`
+                    : info.flashcardCount > 0
+                      ? `已完成 ${info.flashcardCount}/${info.scopeTotal} 词认词`
+                      : "翻卡片 + 跟读发音（入门首选）";
+              }
+            } else if (m.key === "quiz") {
+              // 阶段 2：四选一闯关（需先完成闪卡认词）
+              const unlocked = info?.quizUnlockedCount ?? 0;
+              isLocked = !loading && info !== undefined && unlocked === 0;
+              targetCount = unlocked || (scope?.count || 20);
+              lockMsg = "需先在「闪卡认词」中完成认词后，才能开启四选一闯关哦！";
+              if (loading) {
+                desc = "正在检查已认词进度…";
+              } else if (isLocked) {
+                desc = "🔒 需先完成闪卡认词解锁";
+              } else if (info) {
+                desc =
+                  info.quizCount >= info.scopeTotal
+                    ? `✅ 已通关全部 ${info.scopeTotal} 词`
+                    : `已解锁 ${unlocked}/${info.scopeTotal} 词可闯关`;
+              }
+            } else if (m.key === "listen") {
+              // 阶段 2：听音选词（需先完成闪卡认词）
+              const unlocked = info?.listenUnlockedCount ?? 0;
+              isLocked = !loading && info !== undefined && unlocked === 0;
+              targetCount = unlocked || (scope?.count || 20);
+              lockMsg = "需先在「闪卡认词」中完成认词后，才能开启听音选词哦！";
+              if (loading) {
+                desc = "正在检查已认词进度…";
+              } else if (isLocked) {
+                desc = "🔒 需先完成闪卡认词解锁";
+              } else if (info) {
+                desc =
+                  info.listenCount >= info.scopeTotal
+                    ? `✅ 已通关全部 ${info.scopeTotal} 词`
+                    : `已解锁 ${unlocked}/${info.scopeTotal} 词可听音`;
+              }
+            } else if (m.key === "spell") {
+              // 阶段 3：拼写挑战（需闪卡认词 + 四选一或听音选词 2 个环节都完成后解锁）
+              const unlocked = info?.spellUnlockedCount ?? 0;
+              isLocked = !loading && info !== undefined && unlocked === 0;
+              targetCount = unlocked || (scope?.count || 20);
+              if (info && info.flashcardCount === 0) {
+                lockMsg = "拼写挑战需要先完成「闪卡认词」，再去通过四选一或听音选词哦！";
+              } else {
+                lockMsg = "拼写挑战需要先完成「四选一闯关」或「听音选词」后才能进行哦！";
+              }
+              if (loading) {
+                desc = "正在检查练习完成进度…";
+              } else if (isLocked) {
+                if (info && info.flashcardCount === 0) {
+                  desc = "🔒 需先完成闪卡认词";
+                } else {
+                  desc = "🔒 需先完成四选一或听音";
+                }
+              } else if (info) {
+                desc =
+                  unlocked >= info.scopeTotal
+                    ? `🔥 已解锁全部 ${unlocked} 词可拼写`
+                    : `已解锁 ${unlocked}/${info.scopeTotal} 词可拼写`;
+              }
+            }
 
             const handleClick = () => {
               if (isLocked) {
-                toast("拼写挑战需要先完成闪卡认词、四选一或听音选词中任意一项，先去认词吧！", "info");
+                toast(lockMsg, "info");
                 return;
               }
-              const targetCount = isSpell ? unlockedSpellCount : (scope?.count || 20);
               startMode(m.key, targetCount);
             };
-
-            let desc = m.desc;
-            if (isSpell) {
-              if (spellInfoQ.loading) {
-                desc = "正在检查已认词进度…";
-              } else if (unlockedSpellCount === 0) {
-                desc = "🔒 需先完成认词后解锁";
-              } else {
-                desc = `已解锁 ${unlockedSpellCount} 词可拼写`;
-              }
-            }
 
             return (
               <motion.button
@@ -392,9 +469,13 @@ export default function LearnHomePage() {
                       <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-600">
                         ✍️ 可拼写
                       </span>
+                    ) : w.flashcard_done ? (
+                      <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-brand-600">
+                        🎯 待闯关/听音
+                      </span>
                     ) : (
                       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-400">
-                        🔒 需先认词
+                        🃏 待闪卡认词
                       </span>
                     )}
                     <span

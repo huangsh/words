@@ -24,10 +24,10 @@ export function cleanWord(b: WordInput, partial = false) {
   return out;
 }
 
-/** 查询单词（附带标签 id 列表、当前用户的掌握盒子与是否解锁拼写） */
+/** 查询单词（附带标签 id 列表、当前用户的掌握盒子与各学习模式解锁状态） */
 export function listWords(opts: { unitId?: number; tagId?: number; q?: string; userId: number; limit?: number }) {
   const where: string[] = [];
-  const args: (string | number)[] = [opts.userId, opts.userId];
+  const args: (string | number)[] = [opts.userId, opts.userId, opts.userId, opts.userId];
   if (opts.unitId) {
     where.push("w.unit_id = ?");
     args.push(opts.unitId);
@@ -49,9 +49,21 @@ export function listWords(opts: { unitId?: number; tagId?: number; q?: string; u
               EXISTS (
                 SELECT 1 FROM study_logs sl
                 WHERE sl.user_id = ? AND sl.word_id = w.id
-                  AND sl.mode IN ('flashcard', 'quiz', 'listen')
+                  AND sl.mode = 'flashcard'
                   AND sl.correct = 1
-              ) AS spell_unlocked
+              ) AS flashcard_done,
+              EXISTS (
+                SELECT 1 FROM study_logs sl
+                WHERE sl.user_id = ? AND sl.word_id = w.id
+                  AND sl.mode = 'quiz'
+                  AND sl.correct = 1
+              ) AS quiz_done,
+              EXISTS (
+                SELECT 1 FROM study_logs sl
+                WHERE sl.user_id = ? AND sl.word_id = w.id
+                  AND sl.mode = 'listen'
+                  AND sl.correct = 1
+              ) AS listen_done
        FROM words w
        JOIN units u ON u.id = w.unit_id
        JOIN books b ON b.id = u.book_id
@@ -60,10 +72,25 @@ export function listWords(opts: { unitId?: number; tagId?: number; q?: string; u
        ORDER BY u.book_id, u.grade, u.term = '下', u.sort, w.sort, w.id
        LIMIT ${opts.limit ?? 2000}`,
     )
-    .all(...args) as (Record<string, unknown> & { tag_ids: string | null; spell_unlocked: number })[];
-  return rows.map((r) => ({
-    ...r,
-    tag_ids: r.tag_ids ? r.tag_ids.split(",").map(Number) : [],
-    spell_unlocked: Boolean(r.spell_unlocked),
-  }));
+    .all(...args) as (Record<string, unknown> & {
+      tag_ids: string | null;
+      flashcard_done: number;
+      quiz_done: number;
+      listen_done: number;
+    })[];
+  return rows.map((r) => {
+    const flashcard_done = Boolean(r.flashcard_done);
+    const quiz_done = Boolean(r.quiz_done);
+    const listen_done = Boolean(r.listen_done);
+    return {
+      ...r,
+      tag_ids: r.tag_ids ? r.tag_ids.split(",").map(Number) : [],
+      flashcard_done,
+      quiz_done,
+      listen_done,
+      quiz_unlocked: flashcard_done,
+      listen_unlocked: flashcard_done,
+      spell_unlocked: flashcard_done && (quiz_done || listen_done),
+    };
+  });
 }
