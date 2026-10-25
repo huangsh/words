@@ -104,7 +104,7 @@ export function buildQueue(
     case "grade": {
       // id = grade*10 + (term==='下'?1:0)
       join = "JOIN units u ON u.id = w.unit_id";
-      where = "u.book_id = ? AND u.grade = ? AND u.term = ?";
+      where = "u.book_id = ? AND u.grade = ? AND (u.term = ? OR (u.term NOT IN ('上', '下') AND 1=1))";
       args.push(bookId!, Math.floor(id! / 10), id! % 10 === 1 ? "下" : "上");
       break;
     }

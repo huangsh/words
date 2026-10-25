@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Flame, Headphones, Layers, ListChecks, LogOut, RotateCcw, Settings, Sparkles, SpellCheck, Star, Volume2 } from "lucide-react";
+import { Check, Flame, Headphones, Layers, ListChecks, LogOut, RotateCcw, Settings, SlidersHorizontal, Sparkles, SpellCheck, Star, Volume2 } from "lucide-react";
 import { Button, Empty, Loading, Modal, ProgressBar } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 import type { Tag } from "@/components/WordEditor";
@@ -18,6 +18,10 @@ interface MeData {
 interface Book {
   id: number;
   name: string;
+  description?: string;
+  builtin?: number;
+  unit_count?: number;
+  word_count?: number;
 }
 interface Unit {
   id: number;
@@ -33,6 +37,7 @@ interface WordItem {
   text: string;
   meaning: string;
   phonetic: string;
+  pos?: string;
   emoji: string;
   box: number;
   flashcard_done?: boolean;
@@ -54,11 +59,98 @@ export default function LearnHomePage() {
   const router = useRouter();
   const toast = useToast();
   const meQ = useApi<MeData>("/api/me");
+  const currentUser = meQ.data?.user;
   const booksQ = useApi<{ books: Book[] }>("/api/books");
   const tagsQ = useApi<{ tags: Tag[] }>("/api/tags");
 
-  const [bookId, setBookId] = useState<number>(0);
-  const [gradeKey, setGradeKey] = useState<string>("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsQ = useApi<{ visibleBookIds: number[] | null; dailyGoal: number }>("/api/me/settings");
+
+  // 本地持久化的可见词库 id 列表（优先用户专属 key，回退通用 key）
+  const [visibleBookIds, setVisibleBookIdsState] = useState<number[] | null>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("words_visible_book_ids");
+      if (saved) {
+        try {
+          const arr = JSON.parse(saved);
+          if (Array.isArray(arr) && arr.length > 0) return arr;
+        } catch {}
+      }
+    }
+    return null;
+  });
+
+  // 当用户或远端设置加载时，同步可见词库
+  useEffect(() => {
+    if (currentUser && typeof window !== "undefined") {
+      const userSaved = localStorage.getItem(`words_visible_book_ids_${currentUser.id}`);
+      if (userSaved) {
+        try {
+          const arr = JSON.parse(userSaved);
+          if (Array.isArray(arr) && arr.length > 0) {
+            setVisibleBookIdsState(arr);
+            return;
+          }
+        } catch {}
+      }
+    }
+    if (settingsQ.data?.visibleBookIds) {
+      setVisibleBookIdsState(settingsQ.data.visibleBookIds);
+      if (typeof window !== "undefined" && currentUser) {
+        localStorage.setItem(`words_visible_book_ids_${currentUser.id}`, JSON.stringify(settingsQ.data.visibleBookIds));
+      }
+    }
+  }, [settingsQ.data, currentUser]);
+
+  const updateVisibleBooks = async (newIds: number[]) => {
+    if (newIds.length === 0) {
+      toast("至少需要保留一个显示的词库哦", "error");
+      return;
+    }
+    setVisibleBookIdsState(newIds);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("words_visible_book_ids", JSON.stringify(newIds));
+      if (currentUser) {
+        localStorage.setItem(`words_visible_book_ids_${currentUser.id}`, JSON.stringify(newIds));
+      }
+    }
+    try {
+      await api("/api/me/settings", { method: "PATCH", body: { visibleBookIds: newIds } });
+    } catch (e) {
+      console.error("Failed to sync visible books to server:", e);
+    }
+  };
+
+  const allBooks = booksQ.data?.books || [];
+  const visibleBooks = useMemo(() => {
+    if (!visibleBookIds || visibleBookIds.length === 0) return allBooks;
+    const filtered = allBooks.filter((b) => visibleBookIds.includes(b.id));
+    return filtered.length > 0 ? filtered : allBooks;
+  }, [allBooks, visibleBookIds]);
+
+  const [bookId, setBookIdState] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("words_active_book_id");
+      if (saved) return Number(saved) || 0;
+    }
+    return 0;
+  });
+
+  const setBookId = (id: number) => {
+    setBookIdState(id);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("words_active_book_id", String(id));
+    }
+  };
+
+  const [gradeKey, setGradeKeyState] = useState<string>("");
+  const setGradeKey = (k: string) => {
+    setGradeKeyState(k);
+    if (typeof window !== "undefined" && bookId) {
+      localStorage.setItem(`words_grade_${bookId}`, k);
+    }
+  };
+
   const [scope, setScope] = useState<{ type: string; id?: number; title: string; count: number } | null>(null);
   const [previewUnit, setPreviewUnit] = useState<Unit | null>(null);
   const unitWordsQ = useApi<{ words: WordItem[] }>(previewUnit ? `/api/words?unitId=${previewUnit.id}` : null);
@@ -77,8 +169,13 @@ export default function LearnHomePage() {
   );
 
   useEffect(() => {
-    if (!bookId && booksQ.data?.books.length) setBookId(booksQ.data.books[0].id);
-  }, [booksQ.data, bookId]);
+    if (visibleBooks.length) {
+      const valid = visibleBooks.some((b) => b.id === bookId);
+      if (!bookId || !valid) {
+        setBookId(visibleBooks[0].id);
+      }
+    }
+  }, [visibleBooks, bookId]);
 
   const bookDetailQ = useApi<{ units: Unit[] }>(bookId ? `/api/books/${bookId}` : null);
 
@@ -93,10 +190,15 @@ export default function LearnHomePage() {
   }, [bookDetailQ.data]);
 
   useEffect(() => {
-    if (gradeGroups.length && (!gradeKey || !gradeGroups.some(([k]) => k === gradeKey))) {
-      setGradeKey(gradeGroups[0][0]);
+    if (gradeGroups.length) {
+      const savedKey = typeof window !== "undefined" && bookId ? localStorage.getItem(`words_grade_${bookId}`) : null;
+      if (savedKey && gradeGroups.some(([k]) => k === savedKey)) {
+        setGradeKeyState(savedKey);
+      } else if (!gradeKey || !gradeGroups.some(([k]) => k === gradeKey)) {
+        setGradeKeyState(gradeGroups[0][0]);
+      }
     }
-  }, [gradeGroups, gradeKey]);
+  }, [gradeGroups, gradeKey, bookId]);
 
   async function logout() {
     await api("/api/auth/logout", { method: "POST" });
@@ -138,12 +240,14 @@ export default function LearnHomePage() {
           <div className="flex items-center gap-1 rounded-2xl bg-white px-3 py-1.5 text-sm font-black text-coral-500 shadow-sm">
             <Flame size={17} fill="currentColor" /> {stats.streak}
           </div>
-          {user.role === "parent" && (
-            <Link href="/admin" className="rounded-2xl bg-white p-2.5 text-ink-soft shadow-sm hover:text-ink" title="返回管理端">
-              <Settings size={18} />
-            </Link>
-          )}
-          <button onClick={logout} className="rounded-2xl bg-white p-2.5 text-ink-soft shadow-sm hover:text-ink" title="切换账号">
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="rounded-2xl bg-white p-2.5 text-ink-soft shadow-sm hover:text-ink transition"
+            title="学习设置"
+          >
+            <Settings size={18} />
+          </button>
+          <button onClick={logout} className="rounded-2xl bg-white p-2.5 text-ink-soft shadow-sm hover:text-ink transition" title="切换账号">
             <LogOut size={18} />
           </button>
         </div>
@@ -225,18 +329,28 @@ export default function LearnHomePage() {
         </div>
       )}
 
-      {/* 词库 & 年级选择 */}
-      {booksQ.data && booksQ.data.books.length > 1 && (
-        <div className="mb-3 flex flex-wrap gap-2">
-          {booksQ.data.books.map((b) => (
-            <button
-              key={b.id}
-              onClick={() => setBookId(b.id)}
-              className={`rounded-2xl px-4 py-2 text-sm font-extrabold transition ${bookId === b.id ? "bg-ink text-white" : "bg-white text-ink-soft"}`}
-            >
-              📚 {b.name}
-            </button>
-          ))}
+      {/* 词库选择 & 设置入口 */}
+      {allBooks.length > 0 && (
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-2">
+            {visibleBooks.map((b) => (
+              <button
+                key={b.id}
+                onClick={() => setBookId(b.id)}
+                className={`rounded-2xl px-4 py-2 text-sm font-extrabold transition ${bookId === b.id ? "bg-ink text-white" : "bg-white text-ink-soft"}`}
+              >
+                📚 {b.name}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="flex items-center gap-1.5 rounded-2xl bg-white px-3 py-2 text-xs font-bold text-ink-soft hover:text-ink shadow-sm transition shrink-0"
+            title="选择要显示的词库"
+          >
+            <SlidersHorizontal size={14} className="text-brand-500" />
+            <span>词库设置</span>
+          </button>
         </div>
       )}
 
@@ -460,8 +574,11 @@ export default function LearnHomePage() {
                   </button>
                   <span className="w-8 text-center text-2xl">{w.emoji}</span>
                   <div className="flex-1">
-                    <span className="font-word text-lg font-bold">{w.text}</span>
-                    {w.phonetic && <span className="ml-2 text-sm text-ink-soft">{w.phonetic}</span>}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-word text-lg font-bold">{w.text}</span>
+                      {w.pos && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-semibold text-ink-soft">{w.pos}</span>}
+                      {w.phonetic && <span className="text-sm text-ink-soft">{w.phonetic}</span>}
+                    </div>
                     <div className="text-sm text-ink-soft">{w.meaning}</div>
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -501,6 +618,129 @@ export default function LearnHomePage() {
             }}
           >
             开始背这个单元
+          </Button>
+        </div>
+      </Modal>
+
+      {/* 学习设置弹窗 */}
+      <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} title="⚙️ 学习设置">
+        <div className="space-y-6">
+          {/* 选择要显示的词库 */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-sm font-black text-ink">📚 显示的词库</span>
+              <span className="text-xs text-ink-soft">至少保留 1 个</span>
+            </div>
+            <p className="text-xs text-ink-soft mb-3">
+              勾选您当前需要背诵的词库，未勾选的词库将不在背单词主页中显示。
+            </p>
+            <div className="space-y-2.5">
+              {allBooks.map((b) => {
+                const isChecked = !visibleBookIds || visibleBookIds.includes(b.id);
+                return (
+                  <div
+                    key={b.id}
+                    onClick={() => {
+                      const cur = visibleBookIds ?? allBooks.map((x) => x.id);
+                      if (isChecked) {
+                        if (cur.length <= 1) {
+                          toast("至少需要保留一个显示的词库哦", "error");
+                          return;
+                        }
+                        updateVisibleBooks(cur.filter((id) => id !== b.id));
+                      } else {
+                        updateVisibleBooks([...cur, b.id]);
+                      }
+                    }}
+                    className={`flex items-start gap-3 rounded-2xl border-2 p-3.5 cursor-pointer transition select-none ${
+                      isChecked
+                        ? "border-brand-400 bg-brand-50/40"
+                        : "border-slate-200 bg-slate-50/50 hover:bg-slate-50 opacity-60"
+                    }`}
+                  >
+                    <div
+                      className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-lg border-2 transition"
+                      style={{
+                        borderColor: isChecked ? "#4FA3FF" : "#CBD5E1",
+                        backgroundColor: isChecked ? "#4FA3FF" : "transparent",
+                      }}
+                    >
+                      {isChecked && <Check size={14} className="text-white stroke-[3]" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-ink truncate">{b.name}</span>
+                        {b.builtin ? (
+                          <span className="rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-extrabold text-brand-600">
+                            内置
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="mt-0.5 text-xs text-ink-soft line-clamp-1">
+                        {b.description || "暂无描述"}
+                      </div>
+                      <div className="mt-1 text-[11px] font-semibold text-ink-soft">
+                        {b.unit_count ?? 0} 个单元 · {b.word_count ?? 0} 个单词
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 每日学习目标 */}
+          {user && (
+            <div className="pt-3 border-t border-slate-100">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-black text-ink">🎯 每日学习目标</span>
+                <span className="text-xs font-bold text-brand-600">{user.daily_goal} 题 / 天</span>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {[10, 20, 30, 50].map((goal) => (
+                  <button
+                    key={goal}
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await api("/api/me/settings", { method: "PATCH", body: { dailyGoal: goal } });
+                        meQ.reload();
+                        toast(`已设定每日目标为 ${goal} 题`, "success");
+                      } catch (e) {
+                        toast((e as Error).message, "error");
+                      }
+                    }}
+                    className={`rounded-xl py-2 text-xs font-extrabold border-2 transition ${
+                      user.daily_goal === goal
+                        ? "border-brand-400 bg-brand-50 text-brand-600"
+                        : "border-slate-200 bg-white text-ink-soft hover:text-ink"
+                    }`}
+                  >
+                    {goal} 题
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 家长管理后台快捷入口 */}
+          {user?.role === "parent" && (
+            <div className="pt-3 border-t border-slate-100">
+              <Link
+                href="/admin"
+                className="flex items-center justify-between rounded-2xl bg-slate-100/80 px-4 py-3 text-sm font-bold text-ink hover:bg-slate-200/80 transition"
+              >
+                <div className="flex items-center gap-2">
+                  <span>🛠️</span>
+                  <span>进入词库与成员管理后台</span>
+                </div>
+                <span className="text-xs text-ink-soft">进入 →</span>
+              </Link>
+            </div>
+          )}
+
+          <Button variant="primary" size="md" className="w-full" onClick={() => setSettingsOpen(false)}>
+            完成
           </Button>
         </div>
       </Modal>

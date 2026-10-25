@@ -289,7 +289,7 @@ function FlashcardStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boo
               <Volume2 size={18} /> 点我读一读
             </button>
 
-            {/* 点我读一读下方 显示简单的例句 */}
+            {/* 点我读一读下方 显示简单的例句（正面只显示英文，不泄露中文翻译） */}
             {word.example && (
               <div
                 onClick={(e) => {
@@ -303,7 +303,6 @@ function FlashcardStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boo
                   <span>{word.example}</span>
                   <Volume2 size={15} className="text-brand-500 shrink-0" />
                 </div>
-                {word.example_cn && <div className="mt-1 text-xs text-ink-soft">{word.example_cn}</div>}
               </div>
             )}
 
