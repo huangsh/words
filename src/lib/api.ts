@@ -39,7 +39,11 @@ export function route<C = unknown>(
 
 export async function body<T = Record<string, unknown>>(req: Request): Promise<T> {
   try {
-    return (await req.json()) as T;
+    const parsed = await req.json();
+    if (typeof parsed === "string") {
+      return JSON.parse(parsed) as T;
+    }
+    return parsed as T;
   } catch {
     throw new HttpError(400, "请求格式错误");
   }

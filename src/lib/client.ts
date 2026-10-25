@@ -14,7 +14,7 @@ export async function api<T = Record<string, unknown>>(url: string, opts: { meth
   const res = await fetch(url, {
     method: opts.method ?? (opts.body !== undefined ? "POST" : "GET"),
     headers: opts.body !== undefined ? { "Content-Type": "application/json" } : undefined,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    body: opts.body !== undefined ? (typeof opts.body === "string" ? opts.body : JSON.stringify(opts.body)) : undefined,
     cache: "no-store",
   });
   const data = await res.json().catch(() => ({}));

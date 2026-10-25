@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS words (
   pos TEXT NOT NULL DEFAULT '',
   example TEXT NOT NULL DEFAULT '',
   example_cn TEXT NOT NULL DEFAULT '',
+  synonyms TEXT NOT NULL DEFAULT '',
+  word_family TEXT NOT NULL DEFAULT '',
+  ai_explain TEXT NOT NULL DEFAULT '',
   emoji TEXT NOT NULL DEFAULT '',
   sort INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -105,12 +108,21 @@ declare global {
   var __wordsDb: DB | undefined;
 }
 
+function ensureWordColumns(db: DB) {
+  const cols = (db.prepare("PRAGMA table_info(words)").all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes("synonyms")) db.exec("ALTER TABLE words ADD COLUMN synonyms TEXT NOT NULL DEFAULT ''");
+  if (!cols.includes("word_family")) db.exec("ALTER TABLE words ADD COLUMN word_family TEXT NOT NULL DEFAULT ''");
+  if (!cols.includes("ai_explain")) db.exec("ALTER TABLE words ADD COLUMN ai_explain TEXT NOT NULL DEFAULT ''");
+}
+
 function open(): DB {
   const file = process.env.DATABASE_PATH || path.join(process.cwd(), "data", "words.db");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
+
+  ensureWordColumns(db);
   seedBuiltinBooks(db);
   return db;
 }
@@ -119,6 +131,7 @@ export function getDb(): DB {
   if (!globalThis.__wordsDb) {
     globalThis.__wordsDb = open();
   } else {
+    ensureWordColumns(globalThis.__wordsDb);
     seedBuiltinBooks(globalThis.__wordsDb);
   }
   return globalThis.__wordsDb;

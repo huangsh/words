@@ -19,12 +19,14 @@ export interface Word {
   pos: string;
   example: string;
   example_cn: string;
+  synonyms?: string;
+  word_family?: string;
   emoji: string;
   tag_ids: number[];
   box: number;
 }
 
-const EMPTY = { text: "", meaning: "", phonetic: "", pos: "", example: "", example_cn: "", emoji: "", tag_ids: [] as number[] };
+const EMPTY = { text: "", meaning: "", phonetic: "", pos: "", example: "", example_cn: "", synonyms: "", word_family: "", emoji: "", tag_ids: [] as number[] };
 
 export function WordEditor({
   open,
@@ -81,6 +83,10 @@ export function WordEditor({
         </div>
         <Input label="例句" value={f.example} onChange={set("example")} placeholder="I like apples." />
         <Input label="例句翻译" value={f.example_cn} onChange={set("example_cn")} placeholder="我喜欢苹果。" />
+        <div className="grid grid-cols-2 gap-3">
+          <Input label="同义替换 (JSON 或词列表)" value={f.synonyms} onChange={set("synonyms")} placeholder='{"words":["relieve","ease"],"note":"..."}' />
+          <Input label="词族派生 (JSON)" value={f.word_family} onChange={set("word_family")} placeholder='[{"text":"alleviation","pos":"n.","meaning":"缓解"}]' />
+        </div>
         {tags.length > 0 && (
           <div>
             <span className="mb-2 block text-sm font-semibold text-ink-soft">标签</span>

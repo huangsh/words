@@ -2,11 +2,12 @@
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, BookOpen, GraduationCap, LogOut, Tags, Upload, Users } from "lucide-react";
+import { BarChart3, BookOpen, GraduationCap, LogOut, Settings, Tags, Upload, Users } from "lucide-react";
 import { api } from "@/lib/client";
 
 const NAV = [
   { href: "/admin", label: "词库", icon: BookOpen, match: (p: string) => p === "/admin" || p.startsWith("/admin/books") || p.startsWith("/admin/units") },
+  { href: "/admin/settings", label: "模式设置", icon: Settings },
   { href: "/admin/import", label: "批量导入", icon: Upload },
   { href: "/admin/tags", label: "标签", icon: Tags },
   { href: "/admin/members", label: "家庭成员", icon: Users },

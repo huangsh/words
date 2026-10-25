@@ -2,10 +2,28 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Delete, HelpCircle, RotateCcw, Sparkles, Star, Volume2, X } from "lucide-react";
-import { Button, Empty, Loading, ProgressBar } from "@/components/ui";
+import { Check, Delete, HelpCircle, Keyboard, RefreshCw, RotateCcw, Settings, Sparkles, Star, Volume2, X } from "lucide-react";
+import { Button, Empty, Loading, Modal, ProgressBar } from "@/components/ui";
 import { api, useApi } from "@/lib/client";
 import { sfx, speak } from "@/lib/speech";
+
+interface AiExplainResult {
+  etymology: {
+    formula: string;
+    parts: { affix: string; type: string; meaning: string }[];
+    literal: string;
+  };
+  evolution: {
+    origin: string;
+    development: string;
+    usage: string;
+  };
+  cognates: {
+    root: string;
+    words: { word: string; pos: string; meaning: string; breakdown: string }[];
+    mnemonic: string;
+  };
+}
 
 interface QueueWord {
   id: number;
@@ -18,6 +36,9 @@ interface QueueWord {
   example_cn: string;
   emoji: string;
   box: number;
+  synonyms?: string;
+  word_family?: string;
+  ai_explain?: string;
 }
 interface PoolItem {
   id: number;
@@ -46,7 +67,7 @@ function SessionInner() {
   const type = sp.get("type") || "unit";
   const id = sp.get("id") || "";
   const bookId = sp.get("bookId") || "";
-  const mode = (sp.get("mode") || "flashcard") as "flashcard" | "quiz" | "listen" | "spell";
+  const mode = (sp.get("mode") || "flashcard") as "flashcard" | "quiz" | "listen" | "cloze" | "spell";
   const limit = sp.get("limit") || "50";
   const title = sp.get("title") || "背单词";
 
@@ -59,6 +80,7 @@ function SessionInner() {
   const [firstCorrectCount, setFirstCorrectCount] = useState(0);
   const [wrongWords, setWrongWords] = useState<QueueWord[]>([]);
   const [done, setDone] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   useEffect(() => {
     if (data?.words) {
@@ -220,6 +242,15 @@ function SessionInner() {
         <div className="flex-1">
           <ProgressBar value={(idx + 1) / queue.length} color="#3DD68C" className="h-3.5" />
         </div>
+        <button
+          type="button"
+          onClick={() => setShowShortcuts(true)}
+          className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-xs font-bold text-ink-soft shadow-sm hover:text-brand-600 transition"
+          title="查看快捷键指南"
+        >
+          <Keyboard size={14} className="text-brand-500" />
+          <span>快捷键</span>
+        </button>
         <div className="flex items-center gap-1 rounded-full bg-white px-3 py-1 text-sm font-black text-amber-500 shadow-sm">
           <Star size={16} fill="currentColor" /> {starsEarned}
         </div>
@@ -238,25 +269,155 @@ function SessionInner() {
             exit={{ opacity: 0, x: -40, scale: 0.97 }}
             transition={{ type: "spring", stiffness: 380, damping: 32 }}
           >
-            {mode === "flashcard" && <FlashcardStep word={current} onAnswer={handleResult} />}
+            {mode === "flashcard" && (
+              <FlashcardStep
+                word={current}
+                onAnswer={handleResult}
+                onCacheExplain={(wordId, json) =>
+                  setQueue((q) => q.map((item) => (item.id === wordId ? { ...item, ai_explain: json } : item)))
+                }
+              />
+            )}
             {mode === "quiz" && <QuizStep word={current} pool={data.pool} listenOnly={false} onAnswer={handleResult} />}
             {mode === "listen" && <QuizStep word={current} pool={data.pool} listenOnly={true} onAnswer={handleResult} />}
+            {mode === "cloze" && <ClozeStep word={current} pool={data.pool} onAnswer={handleResult} />}
             {mode === "spell" && <SpellStep word={current} onAnswer={handleResult} />}
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* 快捷键帮助弹窗 */}
+      <Modal open={showShortcuts} onClose={() => setShowShortcuts(false)} title="⌨️ 全流程键盘快捷键指南">
+        <div className="space-y-3.5 text-sm text-ink">
+          <div className="rounded-2xl bg-slate-50 p-3.5 border border-slate-100">
+            <div className="font-bold text-brand-600 mb-2 flex items-center gap-1.5">
+              <span>🗂️ 闪卡认词</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-ink-soft">
+              <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">空格 Space</kbd> / <kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">Enter</kbd> 翻转卡片</div>
+              <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">R</kbd> 朗读单词发音</div>
+              <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">1</kbd> 或 <kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">←</kbd> 标记为“还不熟”</div>
+              <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">2</kbd> 或 <kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">→</kbd> 标记为“认识啦”</div>
+              <div className="sm:col-span-2"><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">E</kbd> 打开 AI 单词深度拆解（结构 / 词义演进 / 同根词串联）</div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-slate-50 p-3.5 border border-slate-100">
+            <div className="font-bold text-brand-600 mb-2 flex items-center gap-1.5">
+              <span>🎯 四选一 / 听音选词 / 语境填空</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-ink-soft">
+              <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">A</kbd> <kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">B</kbd> <kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">C</kbd> <kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">D</kbd> 对应字母答题</div>
+              <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">1</kbd> <kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">2</kbd> <kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">3</kbd> <kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">4</kbd> 数字键答题</div>
+              <div className="sm:col-span-2"><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">空格 Space</kbd> / <kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">R</kbd> 朗读当前题目发音/例句</div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-slate-50 p-3.5 border border-slate-100">
+            <div className="font-bold text-brand-600 mb-2 flex items-center gap-1.5">
+              <span>✍️ 拼写挑战</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-ink-soft">
+              <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">A~Z</kbd> 物理键盘直接输入</div>
+              <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">Backspace</kbd> 退格删除</div>
+              <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">Tab</kbd> 获取下一个字母提示</div>
+              <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">空格 Space</kbd> / <kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">R</kbd> 重新朗读发音</div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-slate-50 p-3.5 border border-slate-100">
+            <div className="font-bold text-brand-600 mb-2 flex items-center gap-1.5">
+              <span>🏆 通关结算</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-ink-soft">
+              <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">Enter</kbd> / <kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">空格</kbd> 再来一轮</div>
+              <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">Esc</kbd> 返回学习首页</div>
+            </div>
+          </div>
+        </div>
+        <div className="mt-5 text-center">
+          <Button size="md" className="w-full" onClick={() => setShowShortcuts(false)}>
+            我知道了
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }
 
 /* ────────────────────── 1. 闪卡模式 ────────────────────── */
-function FlashcardStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean) => void }) {
+function FlashcardStep({
+  word,
+  onAnswer,
+  onCacheExplain,
+}: {
+  word: QueueWord;
+  onAnswer: (ok: boolean) => void;
+  onCacheExplain: (wordId: number, rawJson: string) => void;
+}) {
   const [flipped, setFlipped] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => speak(word.text), 180);
     return () => clearTimeout(t);
   }, [word.text]);
+
+  // 键盘快捷键：空格/Enter翻转卡片，1/左键还不熟，2/右键认识啦，R朗读单词，S朗读例句，E打开AI拆解
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (aiOpen) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (e.code === "Space" || e.key === "Enter") {
+        e.preventDefault();
+        sfx("tap");
+        setFlipped((f) => !f);
+      } else if (e.key === "1" || e.key === "ArrowLeft" || e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        onAnswer(false);
+      } else if (e.key === "2" || e.key === "ArrowRight" || e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        onAnswer(true);
+      } else if (e.key.toLowerCase() === "r" || e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        speak(word.text);
+      } else if (e.key.toLowerCase() === "s" && word.example) {
+        e.preventDefault();
+        speak(word.example);
+      } else if (e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        setAiOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [aiOpen, onAnswer, word.example, word.text]);
+
+  const synData = useMemo<{ words: string[]; note: string } | null>(() => {
+    if (!word.synonyms) return null;
+    try {
+      const parsed = JSON.parse(word.synonyms);
+      if (parsed && Array.isArray(parsed.words) && parsed.words.length > 0) {
+        return { words: parsed.words, note: parsed.note || "" };
+      }
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return { words: parsed, note: "" };
+      }
+    } catch {}
+    return null;
+  }, [word.synonyms]);
+
+  const famData = useMemo<{ text: string; pos: string; meaning: string }[] | null>(() => {
+    if (!word.word_family) return null;
+    try {
+      const parsed = JSON.parse(word.word_family);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    } catch {}
+    return null;
+  }, [word.word_family]);
 
   return (
     <div className="flex flex-col items-center">
@@ -271,23 +432,36 @@ function FlashcardStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boo
           animate={{ rotateY: flipped ? 180 : 0 }}
           transition={{ type: "spring", stiffness: 260, damping: 24 }}
           style={{ transformStyle: "preserve-3d" }}
-          className="relative min-h-[360px] w-full sm:min-h-[400px]"
+          className="relative min-h-[500px] w-full sm:min-h-[580px] md:min-h-[620px]"
         >
           {/* 正面 */}
           <div className="card-soft backface-hidden absolute inset-0 flex flex-col items-center justify-center p-6 text-center sm:p-8">
             {word.emoji && <div className="mb-2 text-5xl sm:text-6xl">{word.emoji}</div>}
             <div className="font-word text-4xl font-black tracking-wide sm:text-5xl">{word.text}</div>
             {word.phonetic && <div className="mt-1.5 text-base sm:text-lg text-ink-soft">{word.phonetic}</div>}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                speak(word.text);
-              }}
-              className="mt-4 flex items-center gap-2 rounded-2xl bg-brand-50 px-5 py-2 text-sm font-extrabold text-brand-600 hover:bg-brand-100 transition"
-            >
-              <Volume2 size={18} /> 点我读一读
-            </button>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  speak(word.text);
+                }}
+                className="flex items-center gap-2 rounded-2xl bg-brand-50 px-5 py-2 text-sm font-extrabold text-brand-600 hover:bg-brand-100 transition"
+              >
+                <Volume2 size={18} /> 点我读一读
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAiOpen(true);
+                }}
+                className="flex items-center gap-1.5 rounded-2xl bg-violet-50 px-4 py-2 text-sm font-extrabold text-violet-600 hover:bg-violet-100 transition border border-violet-200/80 shadow-2xs"
+                title="AI 深度拆解：结构拆解、词义演进逻辑、同根词串联记忆 (快捷键: E)"
+              >
+                <Sparkles size={16} /> AI 单词解释
+              </button>
+            </div>
 
             {/* 点我读一读下方 显示简单的例句（正面只显示英文，不泄露中文翻译） */}
             {word.example && (
@@ -306,34 +480,110 @@ function FlashcardStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boo
               </div>
             )}
 
-            <div className="mt-4 text-xs font-semibold text-ink-soft">👆 点击卡片翻转看中文意思</div>
+            <div className="mt-4 text-xs font-semibold text-ink-soft">
+              👆 点击卡片翻转看中文与提分拓展 <span className="hidden sm:inline font-mono opacity-75 font-normal">(按空格 Space 翻转)</span>
+            </div>
           </div>
 
           {/* 背面 */}
           <div
             style={{ transform: "rotateY(180deg)" }}
-            className="card-soft backface-hidden absolute inset-0 flex flex-col items-center justify-center p-6 text-center sm:p-8"
+            className="card-soft backface-hidden absolute inset-0 flex flex-col items-center justify-start overflow-y-auto p-5 text-center sm:p-6"
           >
-            {word.emoji && <div className="mb-2 text-5xl">{word.emoji}</div>}
-            <div className="font-word text-3xl font-black text-brand-600">{word.text}</div>
-            <div className="mt-2 text-2xl font-extrabold">
-              {word.pos && <span className="mr-1.5 text-base text-ink-soft italic">{word.pos}</span>}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setAiOpen(true);
+              }}
+              className="absolute top-4 right-4 flex items-center gap-1 rounded-xl bg-violet-50 px-3 py-1.5 text-xs font-extrabold text-violet-600 hover:bg-violet-100 transition border border-violet-200/80 shadow-2xs"
+              title="AI 深度拆解：结构拆解、词义演进逻辑、同根词串联记忆 (快捷键: E)"
+            >
+              <Sparkles size={14} /> AI 单词解释
+            </button>
+
+            {word.emoji && <div className="mb-1 text-4xl sm:text-5xl">{word.emoji}</div>}
+            <div className="font-word text-2xl sm:text-3xl font-black text-brand-600">{word.text}</div>
+            <div className="mt-1 text-xl sm:text-2xl font-extrabold">
+              {word.pos && <span className="mr-1.5 text-base text-ink-soft italic font-serif">{word.pos}</span>}
               {word.meaning}
             </div>
+
             {word.example && (
               <div
                 onClick={(e) => {
                   e.stopPropagation();
                   speak(word.example);
                 }}
-                className="mt-4 max-w-sm rounded-2xl bg-slate-50/90 px-4 py-2.5 text-center transition hover:bg-brand-50/80 cursor-pointer border border-slate-100"
+                className="mt-3 w-full max-w-md rounded-2xl bg-slate-50/90 px-4 py-2 text-center transition hover:bg-brand-50/80 cursor-pointer border border-slate-100"
                 title="点击朗读例句"
               >
                 <div className="font-word font-bold text-ink flex items-center justify-center gap-1.5 text-sm sm:text-base">
                   <span>{word.example}</span>
-                  <Volume2 size={15} className="text-brand-500 shrink-0" />
+                  <Volume2 size={14} className="text-brand-500 shrink-0" />
                 </div>
-                {word.example_cn && <div className="mt-1 text-xs text-ink-soft">{word.example_cn}</div>}
+                {word.example_cn && <div className="mt-0.5 text-xs text-ink-soft">{word.example_cn}</div>}
+              </div>
+            )}
+
+            {/* 🔁 同义替换 (Lexical Resource 核心) */}
+            {synData && (
+              <div className="mt-3 w-full max-w-md rounded-2xl bg-amber-50/80 p-3 text-left border border-amber-200/70 shadow-2xs">
+                <div className="flex items-center justify-between text-xs font-bold text-amber-900">
+                  <span className="flex items-center gap-1">🔁 同义替换 (写作提分)</span>
+                  <span className="text-[11px] font-normal text-amber-700/80">点击单词发音</span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {synData.words.map((syn) => (
+                    <button
+                      key={syn}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        speak(syn);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-xl bg-white px-2.5 py-1 text-xs font-bold text-slate-800 shadow-2xs hover:bg-amber-100 hover:text-amber-950 transition border border-amber-200/60"
+                      title="点击朗读同义词"
+                    >
+                      <span className="font-word">{syn}</span>
+                      <Volume2 size={11} className="text-amber-600 opacity-80" />
+                    </button>
+                  ))}
+                </div>
+                {synData.note && (
+                  <div className="mt-2 text-xs font-medium text-amber-950/90 leading-relaxed bg-amber-100/60 rounded-xl px-2.5 py-1.5 border border-amber-200/50">
+                    💡 <span className="font-semibold text-amber-900">辨析提示：</span>{synData.note}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 🌳 词族派生 (Word Family) */}
+            {famData && famData.length > 0 && (
+              <div className="mt-2.5 w-full max-w-md rounded-2xl bg-emerald-50/80 p-3 text-left border border-emerald-200/70 shadow-2xs">
+                <div className="flex items-center justify-between text-xs font-bold text-emerald-900">
+                  <span className="flex items-center gap-1">🌳 词族派生 (拓展记忆)</span>
+                  <span className="text-[11px] font-normal text-emerald-700/80">点击发音</span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {famData.map((f, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        speak(f.text);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-white px-2.5 py-1 text-xs font-bold text-slate-800 shadow-2xs hover:bg-emerald-100 hover:text-emerald-950 transition border border-emerald-200/60"
+                      title="点击朗读派生词"
+                    >
+                      <span className="font-word">{f.text}</span>
+                      {f.pos && <span className="text-[10px] text-emerald-700 italic font-serif">{f.pos}</span>}
+                      {f.meaning && <span className="text-[11px] font-medium text-slate-600">{f.meaning}</span>}
+                      <Volume2 size={11} className="text-emerald-600 opacity-80" />
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -348,7 +598,459 @@ function FlashcardStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boo
           😄 认识啦
         </Button>
       </div>
+
+      {/* AI 单词深度拆解弹窗 */}
+      <AiExplainModal
+        open={aiOpen}
+        onClose={() => setAiOpen(false)}
+        word={word}
+        onCacheExplain={onCacheExplain}
+      />
     </div>
+  );
+}
+
+/* ────────────────────── AI 单词拆解弹窗组件 (DeepSeek Flash 非思考极速版) ────────────────────── */
+function AiExplainModal({
+  open,
+  onClose,
+  word,
+  onCacheExplain,
+}: {
+  open: boolean;
+  onClose: () => void;
+  word: QueueWord;
+  onCacheExplain: (wordId: number, rawJson: string) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [explainData, setExplainData] = useState<AiExplainResult | null>(null);
+  const [isCached, setIsCached] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+
+  // 配置项状态
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [maskedKey, setMaskedKey] = useState("");
+  const [baseUrlInput, setBaseUrlInput] = useState("https://api.deepseek.com");
+  const [modelInput, setModelInput] = useState("deepseek-chat");
+  const [promptInput, setPromptInput] = useState("");
+  const [defaultPrompt, setDefaultPrompt] = useState("");
+  const [hasKey, setHasKey] = useState(true);
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  const loadConfig = useCallback(async () => {
+    try {
+      const cfg = await api<{
+        hasKey: boolean;
+        maskedKey: string;
+        baseUrl: string;
+        model: string;
+        prompt: string;
+        defaultPrompt: string;
+      }>("/api/words/explain");
+      setHasKey(cfg.hasKey);
+      setMaskedKey(cfg.maskedKey || "");
+      setApiKeyInput("");
+      setBaseUrlInput(cfg.baseUrl || "https://api.deepseek.com");
+      setModelInput(cfg.model || "deepseek-chat");
+      setPromptInput(cfg.prompt || "");
+      setDefaultPrompt(cfg.defaultPrompt || "");
+      return cfg;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const fetchExplain = useCallback(
+    async (force = false) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api<{ explain: AiExplainResult; cached: boolean }>("/api/words/explain", {
+          method: "POST",
+          body: {
+            wordId: word.id,
+            text: word.text,
+            meaning: word.meaning,
+            pos: word.pos,
+            force,
+          },
+        });
+        setExplainData(res.explain);
+        setIsCached(res.cached);
+        setShowConfig(false);
+        onCacheExplain(word.id, JSON.stringify(res.explain));
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "调用失败";
+        if (msg.includes("MISSING_API_KEY")) {
+          setHasKey(false);
+          setShowConfig(true);
+          await loadConfig();
+        } else {
+          setError(msg);
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    [loadConfig, onCacheExplain, word.id, word.meaning, word.pos, word.text],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    setError(null);
+    // 优先检查本地队列缓存
+    if (word.ai_explain) {
+      try {
+        const parsed = JSON.parse(word.ai_explain) as AiExplainResult;
+        if (parsed && parsed.etymology && parsed.evolution && parsed.cognates) {
+          setExplainData(parsed);
+          setIsCached(true);
+          return;
+        }
+      } catch {}
+    }
+    setExplainData(null);
+    fetchExplain(false);
+  }, [open, word.id, word.ai_explain, fetchExplain]);
+
+  async function handleSaveConfigAndRun() {
+    setSavingConfig(true);
+    setError(null);
+    try {
+      const cfg = await api<{ hasKey: boolean; maskedKey: string }>("/api/words/explain", {
+        method: "PUT",
+        body: {
+          apiKey: apiKeyInput,
+          baseUrl: baseUrlInput,
+          model: modelInput,
+          prompt: promptInput,
+        },
+      });
+      setHasKey(cfg.hasKey);
+      setMaskedKey(cfg.maskedKey || "");
+      setApiKeyInput("");
+      setShowConfig(false);
+      await fetchExplain(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "保存配置失败");
+    } finally {
+      setSavingConfig(false);
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="✨ AI 单词深度拆解与记忆" wide>
+      <div className="space-y-4">
+        {/* 顶部单词信息栏 */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3 border border-slate-200/70">
+          <div className="flex items-center gap-3">
+            {word.emoji && <span className="text-3xl">{word.emoji}</span>}
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-word text-2xl font-black text-brand-600">{word.text}</span>
+                {word.phonetic && <span className="text-xs text-ink-soft">{word.phonetic}</span>}
+                <button
+                  type="button"
+                  onClick={() => speak(word.text)}
+                  className="rounded-full bg-brand-100/80 p-1.5 text-brand-600 hover:bg-brand-200 transition"
+                  title="朗读单词"
+                >
+                  <Volume2 size={15} />
+                </button>
+              </div>
+              <div className="text-sm font-bold text-ink">
+                {word.pos && <span className="mr-1.5 italic font-serif text-ink-soft">{word.pos}</span>}
+                {word.meaning}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {explainData && !loading && (
+              <button
+                type="button"
+                onClick={() => fetchExplain(true)}
+                className="inline-flex items-center gap-1 rounded-xl bg-white px-2.5 py-1.5 text-xs font-bold text-ink-soft hover:text-brand-600 border border-slate-200 shadow-2xs transition"
+                title="重新调用 DeepSeek 拆解"
+              >
+                <RefreshCw size={13} />
+                <span>重新生成</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={async () => {
+                if (!showConfig) await loadConfig();
+                setShowConfig((s) => !s);
+              }}
+              className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-bold border shadow-2xs transition ${
+                showConfig
+                  ? "bg-violet-600 text-white border-violet-600"
+                  : "bg-white text-ink-soft hover:text-violet-600 border-slate-200"
+              }`}
+              title="配置 DeepSeek API Key 与提示词模板"
+            >
+              <Settings size={13} />
+              <span>AI 设置</span>
+            </button>
+          </div>
+        </div>
+
+        {/* DeepSeek 配置与提示词优化面板 */}
+        {showConfig && (
+          <div className="rounded-2xl border-2 border-violet-200 bg-violet-50/50 p-4 space-y-3 text-left">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-black text-violet-950 flex items-center gap-1.5">
+                <Sparkles size={16} className="text-violet-600" />
+                <span>DeepSeek Flash API & 提示词配置（不开启思考，极速响应）</span>
+              </div>
+              {!hasKey && (
+                <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-800">
+                  需先填写 API Key
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="sm:col-span-1">
+                <label className="block text-xs font-bold text-ink-soft mb-1">
+                  DeepSeek API Key {hasKey && <span className="text-emerald-600 font-normal">（已保存）</span>}
+                </label>
+                <input
+                  type="password"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder={hasKey ? `已保存 (${maskedKey})，留空不变` : "请输入 sk-..."}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-mono focus:border-violet-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-ink-soft mb-1">API Base URL</label>
+                <input
+                  type="text"
+                  value={baseUrlInput}
+                  onChange={(e) => setBaseUrlInput(e.target.value)}
+                  placeholder="https://api.deepseek.com"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-mono focus:border-violet-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-ink-soft mb-1">模型名称 (默认非思考 Flash)</label>
+                <input
+                  type="text"
+                  value={modelInput}
+                  onChange={(e) => setModelInput(e.target.value)}
+                  placeholder="deepseek-chat"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-mono focus:border-violet-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-bold text-ink-soft">
+                  优化版拆解提示词模板（支持变量 <code className="text-violet-700">{"{{word}}"}</code>{" "}
+                  <code className="text-violet-700">{"{{pos}}"}</code>{" "}
+                  <code className="text-violet-700">{"{{meaning}}"}</code>）
+                </label>
+                {defaultPrompt && promptInput !== defaultPrompt && (
+                  <button
+                    type="button"
+                    onClick={() => setPromptInput(defaultPrompt)}
+                    className="text-[11px] font-bold text-violet-600 hover:underline"
+                  >
+                    恢复默认优化提示词
+                  </button>
+                )}
+              </div>
+              <textarea
+                rows={5}
+                value={promptInput}
+                onChange={(e) => setPromptInput(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 bg-white p-2.5 text-xs leading-relaxed focus:border-violet-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              {hasKey && (
+                <Button variant="secondary" size="sm" onClick={() => setShowConfig(false)}>
+                  取消
+                </Button>
+              )}
+              <Button size="sm" onClick={handleSaveConfigAndRun} disabled={savingConfig}>
+                {savingConfig ? "正在保存…" : "💾 保存配置并立即拆解"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* 加载状态 */}
+        {loading && (
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-violet-100 bg-violet-50/40 py-12 px-4 text-center">
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ repeat: Infinity, duration: 2.2, ease: "linear" }}
+              className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-100 text-violet-600"
+            >
+              <Sparkles size={24} />
+            </motion.div>
+            <div className="text-sm font-black text-violet-950">
+              DeepSeek Flash 正在深度拆解「{word.text}」…
+            </div>
+            <div className="mt-1 text-xs text-ink-soft">
+              已启用非思考极速模式（结构拆解 · 词义演进逻辑 · 同根词串联记忆）
+            </div>
+          </div>
+        )}
+
+        {/* 错误提示 */}
+        {error && !loading && (
+          <div className="rounded-2xl border border-coral-200 bg-coral-50 p-4 text-center">
+            <div className="text-sm font-bold text-coral-600">{error}</div>
+            <div className="mt-3 flex justify-center gap-2">
+              <Button size="sm" variant="secondary" onClick={() => fetchExplain(true)}>
+                🔄 重试
+              </Button>
+              <Button
+                size="sm"
+                onClick={async () => {
+                  await loadConfig();
+                  setShowConfig(true);
+                }}
+              >
+                ⚙️ 检查 API 设置
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* 三段式 AI 拆解结果展示 */}
+        {explainData && !loading && (
+          <div className="space-y-3.5 text-left">
+            {/* 1. 结构拆解 */}
+            <div className="rounded-2xl border border-indigo-200/80 bg-indigo-50/60 p-4 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-black text-indigo-950 flex items-center gap-1.5">
+                  <span>🧩 1. 结构拆解（构词公式）</span>
+                </div>
+                {isCached && (
+                  <span className="rounded-full bg-indigo-100/90 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                    ⚡ 极速秒开
+                  </span>
+                )}
+              </div>
+
+              {explainData.etymology?.formula && (
+                <div className="mt-2.5 rounded-xl bg-white px-3.5 py-2 font-mono text-xs sm:text-sm font-black text-indigo-700 border border-indigo-200/60 shadow-2xs">
+                  {explainData.etymology.formula}
+                </div>
+              )}
+
+              {Array.isArray(explainData.etymology?.parts) && explainData.etymology.parts.length > 0 && (
+                <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {explainData.etymology.parts.map((p, i) => (
+                    <div key={i} className="rounded-xl bg-white/90 p-2.5 border border-indigo-100">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-word text-sm font-black text-indigo-600">{p.affix}</span>
+                        {p.type && (
+                          <span className="rounded bg-indigo-100 px-1.5 py-0.2 text-[10px] font-bold text-indigo-800">
+                            {p.type}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-700 leading-snug">{p.meaning}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {explainData.etymology?.literal && (
+                <div className="mt-2.5 rounded-xl bg-indigo-100/60 px-3 py-2 text-xs font-semibold text-indigo-950 leading-relaxed">
+                  💡 <span className="font-black">字面合义：</span>
+                  {explainData.etymology.literal}
+                </div>
+              )}
+            </div>
+
+            {/* 2. 词义演进逻辑 */}
+            <div className="rounded-2xl border border-amber-200/80 bg-amber-50/60 p-4 shadow-2xs">
+              <div className="text-sm font-black text-amber-950 flex items-center gap-1.5">
+                <span>🧭 2. 词义演进逻辑（认知画面链）</span>
+              </div>
+              <div className="mt-2.5 space-y-2 text-xs leading-relaxed text-slate-800">
+                {explainData.evolution?.origin && (
+                  <div className="rounded-xl bg-white/90 px-3 py-2 border border-amber-100">
+                    <span className="font-black text-amber-800">🎬 源头画面：</span>
+                    {explainData.evolution.origin}
+                  </div>
+                )}
+                {explainData.evolution?.development && (
+                  <div className="rounded-xl bg-white/90 px-3 py-2 border border-amber-100">
+                    <span className="font-black text-amber-800">🔄 演进路径：</span>
+                    {explainData.evolution.development}
+                  </div>
+                )}
+                {explainData.evolution?.usage && (
+                  <div className="rounded-xl bg-amber-100/60 px-3 py-2 border border-amber-200/50 font-medium text-amber-950">
+                    <span className="font-black text-amber-900">🎯 现代语境：</span>
+                    {explainData.evolution.usage}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 3. 同根词串联记忆 */}
+            <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/60 p-4 shadow-2xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-black text-emerald-950 flex items-center gap-1.5">
+                  <span>🔗 3. 同根词串联记忆（一网打尽）</span>
+                </div>
+                {explainData.cognates?.root && (
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-extrabold text-emerald-800">
+                    🌱 词根：{explainData.cognates.root}
+                  </span>
+                )}
+              </div>
+
+              {Array.isArray(explainData.cognates?.words) && explainData.cognates.words.length > 0 && (
+                <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {explainData.cognates.words.map((cw, i) => (
+                    <div
+                      key={i}
+                      onClick={() => speak(cw.word)}
+                      className="group cursor-pointer rounded-xl bg-white p-2.5 border border-emerald-200/60 hover:bg-emerald-100/60 transition shadow-2xs"
+                      title="点击朗读同根词"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-word text-sm font-black text-emerald-950 group-hover:text-emerald-700">
+                            {cw.word}
+                          </span>
+                          {cw.pos && <span className="text-[11px] italic font-serif text-emerald-700">{cw.pos}</span>}
+                          <span className="text-xs font-bold text-slate-800">{cw.meaning}</span>
+                        </div>
+                        <Volume2 size={13} className="text-emerald-600 opacity-75 group-hover:opacity-100 shrink-0" />
+                      </div>
+                      {cw.breakdown && (
+                        <div className="mt-1 text-[11px] text-slate-600 leading-snug">{cw.breakdown}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {explainData.cognates?.mnemonic && (
+                <div className="mt-2.5 rounded-xl bg-emerald-100/75 px-3 py-2 text-xs font-bold text-emerald-950 border border-emerald-200/60 leading-relaxed">
+                  ⚡ <span className="text-emerald-900">串记口诀：</span>
+                  {explainData.cognates.mnemonic}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -399,6 +1101,31 @@ function QuizStep({
     setTimeout(() => onAnswer(ok), ok ? 650 : 1400);
   }
 
+  // 键盘快捷键：A/B/C/D 或 1/2/3/4 选择对应选项，空格/R 重新发音
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (pickedId !== null) return;
+
+      const k = e.key.toLowerCase();
+      let index = -1;
+      if (k === "a" || k === "1") index = 0;
+      else if (k === "b" || k === "2") index = 1;
+      else if (k === "c" || k === "3") index = 2;
+      else if (k === "d" || k === "4") index = 3;
+
+      if (index >= 0 && index < options.length) {
+        e.preventDefault();
+        choose(options[index]);
+      } else if (e.code === "Space" || k === "r" || k === "v") {
+        e.preventDefault();
+        speak(word.text);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [options, pickedId, word.text]);
+
   return (
     <div className="space-y-6">
       <div className="card-soft flex flex-col items-center justify-center p-8 text-center">
@@ -408,10 +1135,13 @@ function QuizStep({
               whileTap={{ scale: 0.9 }}
               onClick={() => speak(word.text)}
               className="flex h-24 w-24 items-center justify-center rounded-full bg-brand-400 text-white shadow-lg"
+              title="点击或按空格/R朗读"
             >
               <Volume2 size={44} />
             </motion.button>
-            <div className="mt-3 text-sm font-bold text-ink-soft">点击喇叭再听一遍，选出正确的意思</div>
+            <div className="mt-3 text-sm font-bold text-ink-soft">
+              点击喇叭再听一遍，选出正确的意思 <span className="hidden sm:inline font-mono opacity-75 font-normal">(按空格/R发音)</span>
+            </div>
             {pickedId !== null && (
               <div className="mt-2 text-2xl font-black text-brand-600">
                 {word.emoji ? `${word.emoji} ` : ""}{word.meaning}
@@ -423,7 +1153,7 @@ function QuizStep({
             {word.emoji && <div className="mb-2 text-5xl">{word.emoji}</div>}
             <div className="flex items-center gap-2">
               <span className="font-word text-4xl font-black sm:text-5xl">{word.text}</span>
-              <button onClick={() => speak(word.text)} className="rounded-full bg-brand-50 p-2.5 text-brand-500">
+              <button onClick={() => speak(word.text)} className="rounded-full bg-brand-50 p-2.5 text-brand-500" title="点击或按空格/R朗读">
                 <Volume2 size={22} />
               </button>
             </div>
@@ -439,7 +1169,7 @@ function QuizStep({
       </div>
 
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-        {options.map((opt) => {
+        {options.map((opt, i) => {
           const isTarget = opt.id === word.id;
           const isPicked = pickedId === opt.id;
           let cls = "bg-white text-ink border-2 border-slate-200";
@@ -453,6 +1183,7 @@ function QuizStep({
               shadow = "#e85151";
             }
           }
+          const letters = ["A", "B", "C", "D"];
           return (
             <motion.button
               key={opt.id}
@@ -462,9 +1193,221 @@ function QuizStep({
               className={`btn-3d flex min-h-16 items-center justify-between rounded-2xl px-5 py-4 text-left text-lg font-extrabold ${cls}`}
               style={{ ["--shadow-color" as string]: shadow }}
             >
-              <span className={listenOnly || enToZh ? "" : "font-word text-xl font-bold"}>
-                {listenOnly || enToZh ? opt.meaning : opt.text}
-              </span>
+              <div className="flex items-center gap-3">
+                <span
+                  className={`inline-flex h-7 w-7 items-center justify-center rounded-lg text-xs font-black ${
+                    pickedId !== null && (isTarget || isPicked)
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-100 text-ink-soft"
+                  }`}
+                >
+                  {letters[i]}
+                </span>
+                <span className={listenOnly || enToZh ? "" : "font-word text-xl font-bold"}>
+                  {listenOnly || enToZh ? opt.meaning : opt.text}
+                </span>
+              </div>
+              {pickedId !== null && isTarget && <Check size={22} />}
+            </motion.button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────── 3.5 例句挖空填词（Cloze Test） ────────────────────── */
+function splitSentence(example: string, text: string): { before: string; match: string; after: string } {
+  if (!example) {
+    return { before: "Fill in the blank: ", match: text, after: "." };
+  }
+  const esc = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(^|\\s|[.,!?;:"'()])(${esc})([.,!?;:"'()]|\\s|$)`, "i");
+  const m = example.match(regex);
+  if (m && m.index !== undefined) {
+    const matchStart = m.index + m[1].length;
+    const matchEnd = matchStart + m[2].length;
+    return {
+      before: example.slice(0, matchStart),
+      match: example.slice(matchStart, matchEnd),
+      after: example.slice(matchEnd),
+    };
+  }
+  const subIdx = example.toLowerCase().indexOf(text.toLowerCase());
+  if (subIdx !== -1) {
+    return {
+      before: example.slice(0, subIdx),
+      match: example.slice(subIdx, subIdx + text.length),
+      after: example.slice(subIdx + text.length),
+    };
+  }
+  return {
+    before: example + " ( ",
+    match: text,
+    after: " )",
+  };
+}
+
+function ClozeStep({
+  word,
+  pool,
+  onAnswer,
+}: {
+  word: QueueWord;
+  pool: PoolItem[];
+  onAnswer: (ok: boolean) => void;
+}) {
+  const parts = useMemo(() => splitSentence(word.example, word.text), [word.example, word.text]);
+
+  const options = useMemo(() => {
+    const others = pool.filter((p) => p.id !== word.id && p.text.toLowerCase() !== word.text.toLowerCase());
+    const picked: PoolItem[] = [];
+    const copy = [...others];
+    while (picked.length < 3 && copy.length) {
+      const idx = Math.floor(Math.random() * copy.length);
+      picked.push(copy.splice(idx, 1)[0]);
+    }
+    const all = [{ id: word.id, text: word.text, meaning: word.meaning }, ...picked];
+    for (let i = all.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [all[i], all[j]] = [all[j], all[i]];
+    }
+    return all;
+  }, [pool, word]);
+
+  const [pickedId, setPickedId] = useState<number | null>(null);
+
+  const pickedOption = options.find((o) => o.id === pickedId);
+  const isCorrect = pickedId === word.id;
+
+  function choose(opt: PoolItem) {
+    if (pickedId !== null) return;
+    setPickedId(opt.id);
+    const ok = opt.id === word.id;
+    if (ok) {
+      speak(word.example || word.text);
+      setTimeout(() => onAnswer(true), 900);
+    } else {
+      speak(word.text);
+      setTimeout(() => onAnswer(false), 1400);
+    }
+  }
+
+  // 键盘快捷键：A/B/C/D 或 1/2/3/4 选择对应选项，空格/R 朗读例句
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (pickedId !== null) return;
+
+      const k = e.key.toLowerCase();
+      let index = -1;
+      if (k === "a" || k === "1") index = 0;
+      else if (k === "b" || k === "2") index = 1;
+      else if (k === "c" || k === "3") index = 2;
+      else if (k === "d" || k === "4") index = 3;
+
+      if (index >= 0 && index < options.length) {
+        e.preventDefault();
+        choose(options[index]);
+      } else if (e.code === "Space" || k === "r" || k === "v") {
+        e.preventDefault();
+        speak(word.example || word.text);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [options, pickedId, word.example, word.text]);
+
+  return (
+    <div className="space-y-6">
+      <div className="card-soft flex flex-col items-center justify-center p-6 text-center sm:p-8">
+        <div className="flex items-center gap-2 mb-3">
+          <button
+            type="button"
+            onClick={() => speak(word.example || word.text)}
+            className="rounded-full bg-brand-50 p-2 text-brand-600 hover:bg-brand-100 transition shadow-2xs"
+            title="点击朗读例句 (按空格/R)"
+          >
+            <Volume2 size={20} />
+          </button>
+          <span className="text-xs font-bold text-ink-soft">
+            点击喇叭听例句，根据语境选词填空 <span className="hidden sm:inline font-mono opacity-75 font-normal">(按空格/R朗读)</span>
+          </span>
+        </div>
+
+        {/* 挖空句子主体 */}
+        <div className="font-word text-xl sm:text-2xl font-bold leading-relaxed text-ink text-center max-w-xl">
+          <span>{parts.before}</span>
+          <span
+            className={`inline-flex items-center justify-center min-w-[100px] mx-1.5 px-3 py-0.5 rounded-xl text-lg sm:text-xl font-black border-2 transition-all ${
+              pickedId === null
+                ? "border-dashed border-amber-400 bg-amber-50/80 text-amber-600"
+                : isCorrect
+                ? "border-mint-500 bg-mint-50 text-mint-600 shadow-2xs"
+                : "border-coral-500 bg-coral-50 text-coral-600 shadow-2xs"
+            }`}
+          >
+            {pickedId !== null ? (
+              <span>{pickedOption?.text || word.text}</span>
+            ) : (
+              <span className="tracking-widest opacity-80 font-normal">______</span>
+            )}
+          </span>
+          <span>{parts.after}</span>
+        </div>
+
+        {/* 例句中文释义 */}
+        {word.example_cn && (
+          <div className="mt-3 text-sm text-ink-soft leading-normal max-w-lg">
+            “{word.example_cn}”
+          </div>
+        )}
+
+        {/* 词义提示 */}
+        <div className="mt-4 flex items-center gap-1.5 rounded-full bg-amber-50/90 px-3.5 py-1 text-xs font-bold text-amber-900 border border-amber-200/60 shadow-2xs">
+          <span>🎯 填空目标词义：</span>
+          {word.pos && <span className="font-serif italic text-amber-700">{word.pos}</span>}
+          <span className="text-ink font-extrabold">{word.meaning}</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+        {options.map((opt, i) => {
+          const isTarget = opt.id === word.id;
+          const isPicked = pickedId === opt.id;
+          let cls = "bg-white text-ink border-2 border-slate-200";
+          let shadow = "#e2e8f0";
+          if (pickedId !== null) {
+            if (isTarget) {
+              cls = "bg-mint-500 text-white border-2 border-mint-500";
+              shadow = "#24b872";
+            } else if (isPicked) {
+              cls = "bg-coral-500 text-white border-2 border-coral-500";
+              shadow = "#e85151";
+            }
+          }
+          const letters = ["A", "B", "C", "D"];
+          return (
+            <motion.button
+              key={opt.id}
+              whileTap={pickedId === null ? { scale: 0.97 } : undefined}
+              animate={isPicked && !isTarget ? { x: [0, -10, 10, -6, 6, 0] } : {}}
+              onClick={() => choose(opt)}
+              className={`btn-3d flex min-h-16 items-center justify-between rounded-2xl px-5 py-4 text-left font-extrabold ${cls}`}
+              style={{ ["--shadow-color" as string]: shadow }}
+            >
+              <div className="flex items-center gap-3">
+                <span
+                  className={`inline-flex h-7 w-7 items-center justify-center rounded-lg text-xs font-black ${
+                    pickedId !== null && (isTarget || isPicked)
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-100 text-ink-soft"
+                  }`}
+                >
+                  {letters[i]}
+                </span>
+                <span className="font-word text-xl font-bold">{opt.text}</span>
+              </div>
               {pickedId !== null && isTarget && <Check size={22} />}
             </motion.button>
           );
@@ -530,13 +1473,21 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
     tapChar(nextTargetChar.toLowerCase());
   }, [chars, input.length, letterIndices, status, tapChar]);
 
-  // 支持外接键盘直接输入
+  // 支持外接键盘直接输入：字母键输入、Backspace 删除、Tab 提示、空格/R 朗读
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (status !== "typing") return;
+
       if (e.key === "Backspace") {
         e.preventDefault();
         backspace();
+      } else if (e.key === "Tab") {
+        e.preventDefault();
+        hint();
+      } else if (e.code === "Space" || e.key.toLowerCase() === "r" || e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        speak(word.text);
       } else if (/^[a-zA-Z]$/.test(e.key)) {
         if (input.length < letterIndices.length) {
           tapChar(e.key.toLowerCase());
@@ -545,7 +1496,7 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [backspace, input.length, letterIndices.length, status, tapChar]);
+  }, [backspace, hint, input.length, letterIndices.length, status, tapChar, word.text]);
 
   return (
     <div className="space-y-5">
@@ -651,10 +1602,11 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
             onClick={hint}
             className="btn-3d flex h-11 sm:h-13 flex-[1.4] max-w-16 sm:max-w-20 items-center justify-center gap-1 rounded-xl sm:rounded-2xl border-2 border-amber-200 bg-amber-50 text-xs sm:text-sm font-black text-amber-700 active:translate-y-0.5 disabled:opacity-40"
             style={{ ["--shadow-color" as string]: "#fde68a" }}
-            title="提示一个字母"
+            title="提示一个字母 (快捷键: Tab)"
           >
             <HelpCircle size={16} />
             <span>提示</span>
+            <kbd className="hidden sm:inline-block rounded bg-amber-200/70 px-1 py-0.2 text-[9px] font-mono font-bold">Tab</kbd>
           </motion.button>
 
           {KEYBOARD_ROWS[2].map((ch) => (
@@ -721,6 +1673,22 @@ function FinishView({
   onHome: () => void;
 }) {
   const acc = total ? Math.round((firstCorrect / total) * 100) : 100;
+
+  // 结算页快捷键：Enter/空格 再来一轮，Esc 返回首页
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.code === "Space") {
+        e.preventDefault();
+        onAgain();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        onHome();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onAgain, onHome]);
+
   return (
     <div className="relative mx-auto flex min-h-dvh max-w-lg flex-col items-center justify-center overflow-hidden px-6 py-10 text-center">
       {/* 彩带粒子 */}
@@ -776,10 +1744,18 @@ function FinishView({
 
         <div className="flex gap-3">
           <Button variant="secondary" size="lg" className="flex-1" onClick={onAgain}>
-            <RotateCcw size={18} /> 再来一轮
+            <span className="flex items-center justify-center gap-1.5">
+              <RotateCcw size={18} />
+              <span>再来一轮</span>
+              <kbd className="hidden sm:inline-block rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-mono font-bold">Enter</kbd>
+            </span>
           </Button>
           <Button size="lg" className="flex-1" onClick={onHome}>
-            <Sparkles size={18} /> 返回首页
+            <span className="flex items-center justify-center gap-1.5">
+              <Sparkles size={18} />
+              <span>返回首页</span>
+              <kbd className="hidden sm:inline-block rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-mono font-bold">Esc</kbd>
+            </span>
           </Button>
         </div>
       </motion.div>

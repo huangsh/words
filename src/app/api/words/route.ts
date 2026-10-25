@@ -23,10 +23,10 @@ export const POST = route("parent", async ({ req }) => {
   const id = tx((db) => {
     const r = db
       .prepare(
-        `INSERT INTO words(unit_id, text, meaning, phonetic, pos, example, example_cn, emoji, sort)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort),0)+1 FROM words WHERE unit_id = ?))`,
+        `INSERT INTO words(unit_id, text, meaning, phonetic, pos, example, example_cn, emoji, synonyms, word_family, sort)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort),0)+1 FROM words WHERE unit_id = ?))`,
       )
-      .run(unitId, w.text, w.meaning, w.phonetic, w.pos, w.example, w.example_cn, w.emoji, unitId);
+      .run(unitId, w.text, w.meaning, w.phonetic, w.pos, w.example, w.example_cn, w.emoji, w.synonyms ?? "", w.word_family ?? "", unitId);
     const wid = Number(r.lastInsertRowid);
     const ins = db.prepare("INSERT OR IGNORE INTO word_tags(word_id, tag_id) VALUES(?, ?)");
     tagIds.forEach((t) => ins.run(wid, t));

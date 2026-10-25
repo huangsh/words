@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Check, Flame, Headphones, Layers, ListChecks, LogOut, RotateCcw, Settings, SlidersHorizontal, Sparkles, SpellCheck, Star, Volume2 } from "lucide-react";
+import { Check, FileText, Flame, Headphones, Layers, ListChecks, LogOut, Printer, RotateCcw, Settings, SlidersHorizontal, Sparkles, SpellCheck, Star, Volume2 } from "lucide-react";
 import { Button, Empty, Loading, Modal, ProgressBar } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 import type { Tag } from "@/components/WordEditor";
@@ -39,6 +39,8 @@ interface WordItem {
   phonetic: string;
   pos?: string;
   emoji: string;
+  synonyms?: string;
+  word_family?: string;
   box: number;
   flashcard_done?: boolean;
   quiz_done?: boolean;
@@ -48,10 +50,11 @@ interface WordItem {
   spell_unlocked?: boolean;
 }
 
-const MODES = [
+const ALL_MODES_CONFIG = [
   { key: "flashcard", title: "闪卡认词", desc: "翻卡片 + 跟读发音", icon: Layers, color: "bg-brand-400", shadow: "#1b6be0" },
   { key: "quiz", title: "四选一闯关", desc: "中英互选，快速反应", icon: ListChecks, color: "bg-mint-500", shadow: "#24b872" },
   { key: "listen", title: "听音选词", desc: "磨耳朵，听发音选意思", icon: Headphones, color: "bg-sun-500 text-ink", shadow: "#f5a623" },
+  { key: "cloze", title: "例句挖空", desc: "语境填词，掌握用法", icon: FileText, color: "bg-amber-500 text-white", shadow: "#d97706" },
   { key: "spell", title: "拼写挑战", desc: "点字母块拼出单词", icon: SpellCheck, color: "bg-grape-500", shadow: "#7c3aed" },
 ];
 
@@ -158,11 +161,16 @@ export default function LearnHomePage() {
   const scopeInfoQ = useApi<{
     total: number;
     scopeTotal: number;
+    enabledModes?: string[];
+    modeProgress?: Record<string, { done: number; unlocked: number; prevMode: string | null }>;
     flashcardCount: number;
     quizCount: number;
     listenCount: number;
+    clozeCount: number;
+    spellCount: number;
     quizUnlockedCount: number;
     listenUnlockedCount: number;
+    clozeUnlockedCount: number;
     spellUnlockedCount: number;
   }>(
     scope ? `/api/study/queue?type=${scope.type}&id=${scope.id ?? ""}&bookId=${bookId ?? ""}&limit=1` : null,
@@ -422,9 +430,18 @@ export default function LearnHomePage() {
                     <ProgressBar value={doneRatio} color={masterRatio >= 1 ? "#FFC23C" : "#3DD68C"} />
                   </div>
 
-                  <div className="mt-5 flex gap-2">
-                    <Button variant="secondary" size="sm" onClick={() => setPreviewUnit(u)} className="px-3">
+                  <div className="mt-5 flex items-center gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => setPreviewUnit(u)} className="px-3" title="查看单元词单">
                       词表
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => router.push(`/learn/print?unitId=${u.id}&bookId=${bookId}`)}
+                      className="p-2 text-ink-soft hover:text-brand-600"
+                      title="一键生成默写/听写练习纸"
+                    >
+                      <Printer size={16} />
                     </Button>
                     <Button
                       size="sm"
@@ -444,119 +461,99 @@ export default function LearnHomePage() {
 
       {/* 选择学习模式弹窗 */}
       <Modal open={!!scope} onClose={() => setScope(null)} title={scope?.title}>
-        <p className="mb-4 text-sm text-ink-soft">
-          共 {scope?.count} 个单词，按「闪卡认词 ➔ 闯关/听音 ➔ 拼写挑战」循序渐进：
-        </p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {MODES.map((m) => {
-            const Icon = m.icon;
-            const info = scopeInfoQ.data;
-            const loading = scopeInfoQ.loading;
+        {(() => {
+          const activeModes = ALL_MODES_CONFIG.filter(
+            (m) => !scopeInfoQ.data?.enabledModes || scopeInfoQ.data.enabledModes.includes(m.key),
+          );
+          const pipelineTitles = activeModes.map((m) => m.title).join(" ➔ ");
 
-            let isLocked = false;
-            let lockMsg = "";
-            let targetCount = scope?.count || 20;
-            let desc = m.desc;
+          return (
+            <>
+              <p className="mb-4 text-xs font-bold text-ink-soft leading-relaxed">
+                共 {scope?.count} 个单词，按「{pipelineTitles}」循序渐进闯关（前一阶段完成解锁下一阶段）：
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {activeModes.map((m, idx) => {
+                  const Icon = m.icon;
+                  const info = scopeInfoQ.data;
+                  const loading = scopeInfoQ.loading;
 
-            if (m.key === "flashcard") {
-              // 阶段 1：闪卡认词（直接开放）
-              isLocked = false;
-              if (info) {
-                desc =
-                  info.flashcardCount >= info.scopeTotal
-                    ? `✅ 已认全全部 ${info.scopeTotal} 词`
-                    : info.flashcardCount > 0
-                      ? `已完成 ${info.flashcardCount}/${info.scopeTotal} 词认词`
-                      : "翻卡片 + 跟读发音（入门首选）";
-              }
-            } else if (m.key === "quiz") {
-              // 阶段 2：四选一闯关（需先完成闪卡认词）
-              const unlocked = info?.quizUnlockedCount ?? 0;
-              isLocked = !loading && info !== undefined && unlocked === 0;
-              targetCount = unlocked || (scope?.count || 20);
-              lockMsg = "需先在「闪卡认词」中完成认词后，才能开启四选一闯关哦！";
-              if (loading) {
-                desc = "正在检查已认词进度…";
-              } else if (isLocked) {
-                desc = "🔒 需先完成闪卡认词解锁";
-              } else if (info) {
-                desc =
-                  info.quizCount >= info.scopeTotal
-                    ? `✅ 已通关全部 ${info.scopeTotal} 词`
-                    : `已解锁 ${unlocked}/${info.scopeTotal} 词可闯关`;
-              }
-            } else if (m.key === "listen") {
-              // 阶段 2：听音选词（需先完成闪卡认词）
-              const unlocked = info?.listenUnlockedCount ?? 0;
-              isLocked = !loading && info !== undefined && unlocked === 0;
-              targetCount = unlocked || (scope?.count || 20);
-              lockMsg = "需先在「闪卡认词」中完成认词后，才能开启听音选词哦！";
-              if (loading) {
-                desc = "正在检查已认词进度…";
-              } else if (isLocked) {
-                desc = "🔒 需先完成闪卡认词解锁";
-              } else if (info) {
-                desc =
-                  info.listenCount >= info.scopeTotal
-                    ? `✅ 已通关全部 ${info.scopeTotal} 词`
-                    : `已解锁 ${unlocked}/${info.scopeTotal} 词可听音`;
-              }
-            } else if (m.key === "spell") {
-              // 阶段 3：拼写挑战（需闪卡认词 + 四选一或听音选词 2 个环节都完成后解锁）
-              const unlocked = info?.spellUnlockedCount ?? 0;
-              isLocked = !loading && info !== undefined && unlocked === 0;
-              targetCount = unlocked || (scope?.count || 20);
-              if (info && info.flashcardCount === 0) {
-                lockMsg = "拼写挑战需要先完成「闪卡认词」，再去通过四选一或听音选词哦！";
-              } else {
-                lockMsg = "拼写挑战需要先完成「四选一闯关」或「听音选词」后才能进行哦！";
-              }
-              if (loading) {
-                desc = "正在检查练习完成进度…";
-              } else if (isLocked) {
-                if (info && info.flashcardCount === 0) {
-                  desc = "🔒 需先完成闪卡认词";
-                } else {
-                  desc = "🔒 需先完成四选一或听音";
-                }
-              } else if (info) {
-                desc =
-                  unlocked >= info.scopeTotal
-                    ? `🔥 已解锁全部 ${unlocked} 词可拼写`
-                    : `已解锁 ${unlocked}/${info.scopeTotal} 词可拼写`;
-              }
-            }
+                  let isLocked = false;
+                  let lockMsg = "";
+                  let targetCount = scope?.count || 20;
+                  let desc = m.desc;
 
-            const handleClick = () => {
-              if (isLocked) {
-                toast(lockMsg, "info");
-                return;
-              }
-              startMode(m.key, targetCount);
-            };
+                  if (idx === 0) {
+                    // 首个阶段（闪卡认词）：直接开放
+                    isLocked = false;
+                    if (info) {
+                      desc =
+                        info.flashcardCount >= info.scopeTotal
+                          ? `✅ 已认全全部 ${info.scopeTotal} 词`
+                          : info.flashcardCount > 0
+                          ? `已完成 ${info.flashcardCount}/${info.scopeTotal} 词认词`
+                          : "翻卡片 + 跟读发音（入门首选）";
+                    }
+                  } else {
+                    const prevMode = activeModes[idx - 1];
+                    const unlocked =
+                      info?.modeProgress?.[m.key]?.unlocked ??
+                      (info as Record<string, unknown> | undefined)?.[`${m.key}UnlockedCount`] as number ??
+                      0;
+                    const done =
+                      info?.modeProgress?.[m.key]?.done ??
+                      (info as Record<string, unknown> | undefined)?.[`${m.key}Count`] as number ??
+                      0;
 
-            return (
-              <motion.button
-                key={m.key}
-                whileTap={{ scale: 0.96 }}
-                onClick={handleClick}
-                className={`btn-3d ${isLocked ? "bg-slate-400 opacity-80" : m.color} flex items-center gap-3.5 rounded-3xl p-4 text-left text-white`}
-                style={{ ["--shadow-color" as string]: isLocked ? "#94a3b8" : m.shadow }}
-              >
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/25">
-                  <Icon size={26} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 text-lg font-black">
-                    <span>{m.title}</span>
-                    {isLocked && <span className="text-sm">🔒</span>}
-                  </div>
-                  <div className="truncate text-xs opacity-90">{desc}</div>
-                </div>
-              </motion.button>
-            );
-          })}
-        </div>
+                    isLocked = !loading && info !== undefined && unlocked === 0;
+                    targetCount = unlocked || (scope?.count || 20);
+                    lockMsg = `需先在「${prevMode.title}」中完成练习后，才能开启${m.title}哦！`;
+
+                    if (loading) {
+                      desc = "正在检查前置完成进度…";
+                    } else if (isLocked) {
+                      desc = `🔒 需先完成${prevMode.title}解锁`;
+                    } else if (info) {
+                      desc =
+                        done >= info.scopeTotal
+                          ? `✅ 已通关全部 ${info.scopeTotal} 词`
+                          : `已解锁 ${unlocked}/${info.scopeTotal} 词可练习`;
+                    }
+                  }
+
+                  const handleClick = () => {
+                    if (isLocked) {
+                      toast(lockMsg, "info");
+                      return;
+                    }
+                    startMode(m.key, targetCount);
+                  };
+
+                  return (
+                    <motion.button
+                      key={m.key}
+                      whileTap={{ scale: 0.96 }}
+                      onClick={handleClick}
+                      className={`btn-3d ${isLocked ? "bg-slate-400 opacity-80" : m.color} flex items-center gap-3.5 rounded-3xl p-4 text-left text-white`}
+                      style={{ ["--shadow-color" as string]: isLocked ? "#94a3b8" : m.shadow }}
+                    >
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/25">
+                        <Icon size={26} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 text-lg font-black">
+                          <span>{m.title}</span>
+                          {isLocked && <span className="text-sm">🔒</span>}
+                        </div>
+                        <div className="text-xs opacity-90 truncate">{desc}</div>
+                      </div>
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </>
+          );
+        })()}
       </Modal>
 
       {/* 单元词表预览弹窗 */}
@@ -580,6 +577,25 @@ export default function LearnHomePage() {
                       {w.phonetic && <span className="text-sm text-ink-soft">{w.phonetic}</span>}
                     </div>
                     <div className="text-sm text-ink-soft">{w.meaning}</div>
+                    {(() => {
+                      if (!w.synonyms) return null;
+                      try {
+                        const parsed = JSON.parse(w.synonyms);
+                        const words = parsed.words || (Array.isArray(parsed) ? parsed : []);
+                        if (words.length > 0) {
+                          return (
+                            <div className="mt-0.5 flex items-center gap-1 text-[11px] text-amber-800">
+                              <span className="font-bold text-amber-600">≈</span>
+                              <span className="font-medium text-amber-900/90 truncate max-w-xs">
+                                {words.slice(0, 3).join(", ")}
+                                {words.length > 3 ? "…" : ""}
+                              </span>
+                            </div>
+                          );
+                        }
+                      } catch {}
+                      return null;
+                    })()}
                   </div>
                   <div className="flex items-center gap-1.5">
                     {w.spell_unlocked ? (
@@ -607,10 +623,22 @@ export default function LearnHomePage() {
             })}
           </div>
         )}
-        <div className="mt-4">
+        <div className="mt-4 flex gap-2.5">
           <Button
             size="lg"
-            className="w-full"
+            variant="secondary"
+            className="flex-1 gap-1.5"
+            onClick={() => {
+              const u = previewUnit!;
+              router.push(`/learn/print?unitId=${u.id}&bookId=${bookId}`);
+            }}
+          >
+            <Printer size={18} />
+            <span>生成练习纸</span>
+          </Button>
+          <Button
+            size="lg"
+            className="flex-1"
             onClick={() => {
               const u = previewUnit!;
               setPreviewUnit(null);

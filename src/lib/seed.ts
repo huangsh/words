@@ -2,10 +2,37 @@ import type { DatabaseSync } from "node:sqlite";
 import { EMOJI, PEP_BOOK, PEP_UNITS, PHONETIC } from "./data/pep";
 import { EXAMPLES } from "./data/examples";
 import { IELTS_BOOK, IELTS_UNITS } from "./data/ielts";
+import { IELTS_LEXICAL } from "./data/ielts/lexical";
 
 export const SEED_KEY = "seed_pep_v2_2025";
 export const EXAMPLES_SEED_KEY = "seed_examples_v1";
 export const IELTS_SEED_KEY = "seed_ielts_v2_132units";
+export const IELTS_LEXICAL_SEED_KEY = "seed_ielts_lexical_v1";
+
+/** 增量补充雅思词汇的同义替换与词族派生（Lexical Resource，非破坏性同步，保留学习记录） */
+export function syncIeltsLexical(db: DatabaseSync) {
+  const done = db.prepare("SELECT value FROM settings WHERE key = ?").get(IELTS_LEXICAL_SEED_KEY);
+  if (done) return;
+
+  const updateStmt = db.prepare(
+    "UPDATE words SET synonyms = ?, word_family = ? WHERE lower(text) = lower(?) AND (synonyms = '' OR synonyms IS NULL)",
+  );
+  db.exec("BEGIN");
+  try {
+    for (const [text, lex] of Object.entries(IELTS_LEXICAL)) {
+      const synJson = JSON.stringify({ words: lex.syn, note: lex.note || "" });
+      const famJson = JSON.stringify(lex.fam || []);
+      updateStmt.run(synJson, famJson, text);
+    }
+    db.prepare(
+      "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    ).run(IELTS_LEXICAL_SEED_KEY, new Date().toISOString());
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    console.error("Failed to sync IELTS lexical resources:", e);
+  }
+}
 
 /** 补充现有单词的例句（如果缺失） */
 export function syncExamples(db: DatabaseSync) {
@@ -126,13 +153,16 @@ export function seedIeltsBook(db: DatabaseSync) {
 
     const insUnit = db.prepare("INSERT INTO units(book_id, grade, term, name, sort) VALUES(?, ?, ?, ?, ?)");
     const insWord = db.prepare(
-      "INSERT INTO words(unit_id, text, meaning, phonetic, emoji, pos, example, example_cn, sort) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO words(unit_id, text, meaning, phonetic, emoji, pos, example, example_cn, synonyms, word_family, sort) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     const insWordTag = db.prepare("INSERT OR IGNORE INTO word_tags(word_id, tag_id) VALUES(?, ?)");
 
     IELTS_UNITS.forEach((u, ui) => {
       const unitId = Number(insUnit.run(bookId, u.grade, u.term, u.name, ui).lastInsertRowid);
       u.words.forEach((w, wi) => {
+        const lex = IELTS_LEXICAL[w.text.toLowerCase()];
+        const synJson = lex ? JSON.stringify({ words: lex.syn, note: lex.note || "" }) : "";
+        const famJson = lex && lex.fam && lex.fam.length > 0 ? JSON.stringify(lex.fam) : "";
         const wordId = Number(
           insWord.run(
             unitId,
@@ -143,6 +173,8 @@ export function seedIeltsBook(db: DatabaseSync) {
             w.pos || "",
             w.example || "",
             w.example_cn || "",
+            synJson,
+            famJson,
             wi,
           ).lastInsertRowid,
         );
@@ -166,4 +198,5 @@ export function seedBuiltinBooks(db: DatabaseSync) {
   syncExamples(db);
   seedPepBook(db);
   seedIeltsBook(db);
+  syncIeltsLexical(db);
 }

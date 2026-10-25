@@ -1,5 +1,5 @@
 import "server-only";
-import { getDb, tx } from "./db";
+import { getDb, tx, type DB } from "./db";
 
 /** Leitner 盒子：box 0 = 新词，1~5 逐级巩固，5 视为已掌握 */
 export const MASTERED_BOX = 5;
@@ -16,6 +16,9 @@ export interface WordRow {
   example: string;
   example_cn: string;
   emoji: string;
+  synonyms?: string;
+  word_family?: string;
+  ai_explain?: string;
   box?: number;
   flashcard_done?: number;
   quiz_done?: number;
@@ -23,7 +26,7 @@ export interface WordRow {
   spell_eligible?: number;
 }
 
-const WORD_COLS = "w.id, w.unit_id, w.text, w.meaning, w.phonetic, w.pos, w.example, w.example_cn, w.emoji";
+const WORD_COLS = "w.id, w.unit_id, w.text, w.meaning, w.phonetic, w.pos, w.example, w.example_cn, w.emoji, w.synonyms, w.word_family, w.ai_explain";
 
 export function recordAnswer(userId: number, wordId: number, mode: string, correct: boolean, updateBox: boolean) {
   return tx((db) => {
@@ -76,12 +79,59 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+export interface SystemMode {
+  key: string;
+  title: string;
+  desc: string;
+  iconName: string;
+  color: string;
+  shadow: string;
+  required: boolean;
+}
+
+export const SYSTEM_MODES: SystemMode[] = [
+  { key: "flashcard", title: "闪卡认词", desc: "翻卡片 + 跟读发音", iconName: "Layers", color: "bg-brand-400", shadow: "#1b6be0", required: true },
+  { key: "quiz", title: "四选一闯关", desc: "中英互选，快速反应", iconName: "ListChecks", color: "bg-mint-500", shadow: "#24b872", required: false },
+  { key: "listen", title: "听音选词", desc: "磨耳朵，听发音选意思", iconName: "Headphones", color: "bg-sun-500 text-ink", shadow: "#f5a623", required: false },
+  { key: "cloze", title: "例句挖空", desc: "语境填词，掌握用法", iconName: "FileText", color: "bg-amber-500", shadow: "#d97706", required: false },
+  { key: "spell", title: "拼写挑战", desc: "全键盘拼出完整单词", iconName: "SpellCheck", color: "bg-grape-500", shadow: "#7c3aed", required: false },
+];
+
+/** 获取当前系统启用的学习模式列表（严格保证 flashcard 在首位且必开启） */
+export function getEnabledModes(dbInstance?: DB): string[] {
+  const db = dbInstance ?? getDb();
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'enabled_modes'").get() as { value: string } | undefined;
+  if (!row?.value) {
+    return ["flashcard", "quiz", "listen", "cloze", "spell"];
+  }
+  try {
+    const list = JSON.parse(row.value);
+    if (Array.isArray(list) && list.length > 0) {
+      const set = new Set(list);
+      const valid = SYSTEM_MODES.map((m) => m.key).filter((k) => k === "flashcard" || set.has(k));
+      return valid.length > 0 ? valid : ["flashcard"];
+    }
+  } catch {}
+  return ["flashcard", "quiz", "listen", "cloze", "spell"];
+}
+
+/** 家长更新系统启用的学习模式（flashcard 强制保留） */
+export function setEnabledModes(modes: string[]): string[] {
+  const set = new Set(modes);
+  set.add("flashcard");
+  const filtered = SYSTEM_MODES.map((m) => m.key).filter((k) => set.has(k));
+  const val = JSON.stringify(filtered);
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO settings(key, value) VALUES('enabled_modes', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+  ).run(val);
+  return filtered;
+}
+
 export type ScopeType = "unit" | "tag" | "review" | "wrong" | "grade";
 
 /** 生成学习队列：
- * 阶段 1：闪卡认词（无门槛，直接开放）
- * 阶段 2：四选一闯关 / 听音选词（需先完成闪卡认词）
- * 阶段 3：拼写挑战（需四选一与听音选词 2 个都完成后才开放）
+ * 按照已开启模式的流水线顺序（前一个模式完成后才可以进行下一个模式）
  */
 export function buildQueue(
   userId: number,
@@ -92,8 +142,11 @@ export function buildQueue(
   mode?: string,
 ) {
   const db = getDb();
+  const enabledModes = getEnabledModes(db);
+
   let where = "";
-  const args: (string | number)[] = [userId, userId, userId, userId];
+  // 5 个 EXISTS (flashcard, quiz, listen, cloze, spell) + 1 个 LEFT JOIN progress
+  const args: (string | number)[] = [userId, userId, userId, userId, userId, userId];
   let join = "";
 
   switch (type) {
@@ -144,7 +197,19 @@ export function buildQueue(
                 WHERE sl.user_id = ? AND sl.word_id = w.id
                   AND sl.mode = 'listen'
                   AND sl.correct = 1
-              ) AS listen_done
+              ) AS listen_done,
+              EXISTS (
+                SELECT 1 FROM study_logs sl
+                WHERE sl.user_id = ? AND sl.word_id = w.id
+                  AND sl.mode = 'cloze'
+                  AND sl.correct = 1
+              ) AS cloze_done,
+              EXISTS (
+                SELECT 1 FROM study_logs sl
+                WHERE sl.user_id = ? AND sl.word_id = w.id
+                  AND sl.mode = 'spell'
+                  AND sl.correct = 1
+              ) AS spell_done
        FROM words w ${join}
        LEFT JOIN progress p ON p.word_id = w.id AND p.user_id = ?
        WHERE ${where}
@@ -155,35 +220,53 @@ export function buildQueue(
       flashcard_done: number;
       quiz_done: number;
       listen_done: number;
+      cloze_done: number;
+      spell_done: number;
     })[];
 
   const flashcardCount = rows.filter((r) => Number(r.flashcard_done) === 1).length;
   const quizCount = rows.filter((r) => Number(r.quiz_done) === 1).length;
   const listenCount = rows.filter((r) => Number(r.listen_done) === 1).length;
-  // 拼写挑战解锁条件：先完成闪卡认词，且完成（四选一闯关 或 听音选词）中任意一项（共完成 2 个阶段）
-  const spellCount = rows.filter(
-    (r) => Number(r.flashcard_done) === 1 && (Number(r.quiz_done) === 1 || Number(r.listen_done) === 1),
-  ).length;
+  const clozeCount = rows.filter((r) => Number(r.cloze_done) === 1).length;
+  const spellCount = rows.filter((r) => Number(r.spell_done) === 1).length;
+
+  // 根据已开启模式的流水线，计算每个模式的解锁数量（前一个模式完成后才可以进行下一个模式）
+  const unlockedMap: Record<string, number> = {};
+  const prevModeMap: Record<string, string | null> = {};
+
+  enabledModes.forEach((mKey, idx) => {
+    if (idx === 0) {
+      // 首个模式（flashcard）直接全部解锁
+      unlockedMap[mKey] = rows.length;
+      prevModeMap[mKey] = null;
+    } else {
+      const prevKey = enabledModes[idx - 1];
+      prevModeMap[mKey] = prevKey;
+      unlockedMap[mKey] = rows.filter((r) => Number((r as unknown as Record<string, unknown>)[`${prevKey}_done`]) === 1).length;
+    }
+  });
 
   let candidateRows = rows;
-  if (mode === "quiz" || mode === "listen") {
-    // 四选一或听音选词：需先完成闪卡认词
-    candidateRows = rows.filter((r) => Number(r.flashcard_done) === 1);
-  } else if (mode === "spell") {
-    // 拼写挑战：需完成闪卡 + （四选一 或 听音选词）2 个阶段
-    candidateRows = rows.filter(
-      (r) => Number(r.flashcard_done) === 1 && (Number(r.quiz_done) === 1 || Number(r.listen_done) === 1),
-    );
+  if (mode && enabledModes.includes(mode)) {
+    const mIdx = enabledModes.indexOf(mode);
+    if (mIdx > 0) {
+      const prevKey = enabledModes[mIdx - 1];
+      candidateRows = rows.filter((r) => Number((r as unknown as Record<string, unknown>)[`${prevKey}_done`]) === 1);
+    }
   }
 
   const picked = candidateRows.slice(0, limit);
-  const words = shuffle(picked).map(({ pri, flashcard_done, quiz_done, listen_done, ...w }) => {
-    void pri;
-    void flashcard_done;
-    void quiz_done;
-    void listen_done;
-    return w;
-  });
+  const words = shuffle(picked).map(
+    ({ pri, flashcard_done, quiz_done, listen_done, cloze_done, spell_done, ...w }) => {
+      void pri;
+      void flashcard_done;
+      void quiz_done;
+      void listen_done;
+      void cloze_done;
+      void spell_done;
+      return w;
+    },
+  );
 
   // 干扰项：同单元 / 同册的其它单词
   const unitIds = [...new Set(rows.map((w) => w.unit_id))];
@@ -197,18 +280,29 @@ export function buildQueue(
       )
       .all(...unitIds, ...unitIds) as typeof pool;
   }
+
   return {
     words,
     pool,
     total: candidateRows.length,
     scopeTotal: rows.length,
+    enabledModes,
+    modeProgress: {
+      flashcard: { done: flashcardCount, unlocked: rows.length, prevMode: null },
+      quiz: { done: quizCount, unlocked: unlockedMap.quiz ?? 0, prevMode: prevModeMap.quiz ?? null },
+      listen: { done: listenCount, unlocked: unlockedMap.listen ?? 0, prevMode: prevModeMap.listen ?? null },
+      cloze: { done: clozeCount, unlocked: unlockedMap.cloze ?? 0, prevMode: prevModeMap.cloze ?? null },
+      spell: { done: spellCount, unlocked: unlockedMap.spell ?? 0, prevMode: prevModeMap.spell ?? null },
+    },
     flashcardCount,
     quizCount,
     listenCount,
-    quizUnlockedCount: flashcardCount,
-    listenUnlockedCount: flashcardCount,
-    spellUnlockedCount: spellCount,
+    clozeCount,
     spellCount,
+    quizUnlockedCount: unlockedMap.quiz ?? 0,
+    listenUnlockedCount: unlockedMap.listen ?? 0,
+    clozeUnlockedCount: unlockedMap.cloze ?? 0,
+    spellUnlockedCount: unlockedMap.spell ?? 0,
   };
 }
 

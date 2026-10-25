@@ -8,6 +8,12 @@ export interface IeltsWord {
   emoji: string;
 }
 
+export interface WordLexical {
+  syn: string[];
+  note?: string;
+  fam: { text: string; pos: string; meaning: string }[];
+}
+
 export interface IeltsUnit {
   grade: number;
   term: string;
