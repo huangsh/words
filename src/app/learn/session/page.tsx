@@ -47,7 +47,7 @@ function SessionInner() {
   const id = sp.get("id") || "";
   const bookId = sp.get("bookId") || "";
   const mode = (sp.get("mode") || "flashcard") as "flashcard" | "quiz" | "listen" | "spell";
-  const limit = sp.get("limit") || "12";
+  const limit = sp.get("limit") || "50";
   const title = sp.get("title") || "背单词";
 
   const queryUrl = `/api/study/queue?type=${type}&id=${id}&bookId=${bookId}&limit=${limit}&mode=${mode}`;
@@ -341,7 +341,11 @@ function QuizStep({
               <Volume2 size={44} />
             </motion.button>
             <div className="mt-3 text-sm font-bold text-ink-soft">点击喇叭再听一遍，选出正确的意思</div>
-            {pickedId !== null && <div className="font-word mt-2 text-2xl font-black text-brand-600">{word.text}</div>}
+            {pickedId !== null && (
+              <div className="mt-2 text-2xl font-black text-brand-600">
+                {word.emoji ? `${word.emoji} ` : ""}{word.meaning}
+              </div>
+            )}
           </>
         ) : enToZh ? (
           <>
@@ -387,17 +391,8 @@ function QuizStep({
               className={`btn-3d flex min-h-16 items-center justify-between rounded-2xl px-5 py-4 text-left text-lg font-extrabold ${cls}`}
               style={{ ["--shadow-color" as string]: shadow }}
             >
-              <span className={enToZh ? "" : "font-word text-xl"}>
-                {listenOnly ? (
-                  <>
-                    <span className="font-word mr-2 font-black">{opt.text}</span>
-                    <span className="text-base font-bold opacity-90">{opt.meaning}</span>
-                  </>
-                ) : enToZh ? (
-                  opt.meaning
-                ) : (
-                  opt.text
-                )}
+              <span className={listenOnly || enToZh ? "" : "font-word text-xl font-bold"}>
+                {listenOnly || enToZh ? opt.meaning : opt.text}
               </span>
               {pickedId !== null && isTarget && <Check size={22} />}
             </motion.button>

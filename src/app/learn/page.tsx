@@ -90,9 +90,10 @@ export default function LearnHomePage() {
     router.replace("/login");
   }
 
-  function startMode(mode: string, limit = 12) {
+  function startMode(mode: string, limit?: number) {
     if (!scope) return;
-    const qs = new URLSearchParams({ type: scope.type, mode, limit: String(limit), title: scope.title });
+    const count = limit ?? scope.count;
+    const qs = new URLSearchParams({ type: scope.type, mode, limit: String(count), title: scope.title });
     if (scope.id) qs.set("id", String(scope.id));
     if (bookId) qs.set("bookId", String(bookId));
     router.push(`/learn/session?${qs.toString()}`);
@@ -328,7 +329,8 @@ export default function LearnHomePage() {
                 toast("拼写挑战需要先完成闪卡认词、四选一或听音选词中任意一项，先去认词吧！", "info");
                 return;
               }
-              startMode(m.key, Math.min(isSpell ? unlockedSpellCount || 12 : scope?.count || 12, 15));
+              const targetCount = isSpell ? unlockedSpellCount : (scope?.count || 20);
+              startMode(m.key, targetCount);
             };
 
             let desc = m.desc;
