@@ -1,9 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
-import { EMOJI, PEP_BOOK, PEP_UNITS } from "./data/pep";
+import { EMOJI, PEP_BOOK, PEP_UNITS, PHONETIC } from "./data/pep";
 
-const SEED_KEY = "seed_pep_v1";
+export const SEED_KEY = "seed_pep_v2_2025";
 
-/** 首次启动时写入内置词库与默认标签（只执行一次，之后可自由编辑） */
+/** 首次启动或版本升级时写入/更新最新内置词库与默认标签 */
 export function seedBuiltinBooks(db: DatabaseSync) {
   const done = db.prepare("SELECT value FROM settings WHERE key = ?").get(SEED_KEY);
   if (done) return;
@@ -16,13 +16,30 @@ export function seedBuiltinBooks(db: DatabaseSync) {
     insTag.run("短语", "#A55EEA");
     const phraseTag = db.prepare("SELECT id FROM tags WHERE name = '短语'").get() as { id: number };
 
-    const book = db
-      .prepare("INSERT INTO books(name, description, builtin, sort) VALUES(?, ?, 1, 0)")
-      .run(PEP_BOOK.name, PEP_BOOK.description);
-    const bookId = Number(book.lastInsertRowid);
+    const existingBook = db.prepare("SELECT id FROM books WHERE builtin = 1 ORDER BY id LIMIT 1").get() as
+      | { id: number }
+      | undefined;
+
+    let bookId: number;
+    if (existingBook) {
+      bookId = existingBook.id;
+      db.prepare("UPDATE books SET name = ?, description = ? WHERE id = ?").run(
+        PEP_BOOK.name,
+        PEP_BOOK.description,
+        bookId,
+      );
+      db.prepare("DELETE FROM units WHERE book_id = ?").run(bookId);
+    } else {
+      const book = db
+        .prepare("INSERT INTO books(name, description, builtin, sort) VALUES(?, ?, 1, 0)")
+        .run(PEP_BOOK.name, PEP_BOOK.description);
+      bookId = Number(book.lastInsertRowid);
+    }
 
     const insUnit = db.prepare("INSERT INTO units(book_id, grade, term, name, sort) VALUES(?, ?, ?, ?, ?)");
-    const insWord = db.prepare("INSERT INTO words(unit_id, text, meaning, emoji, sort) VALUES(?, ?, ?, ?, ?)");
+    const insWord = db.prepare(
+      "INSERT INTO words(unit_id, text, meaning, phonetic, emoji, sort) VALUES(?, ?, ?, ?, ?, ?)",
+    );
     const insWordTag = db.prepare("INSERT OR IGNORE INTO word_tags(word_id, tag_id) VALUES(?, ?)");
 
     PEP_UNITS.forEach((u, ui) => {
@@ -32,12 +49,16 @@ export function seedBuiltinBooks(db: DatabaseSync) {
         const text = pair.slice(0, idx).trim();
         const meaning = pair.slice(idx + 1).trim();
         if (!text) return;
-        const wordId = Number(insWord.run(unitId, text, meaning, EMOJI[text] ?? "", wi).lastInsertRowid);
+        const wordId = Number(
+          insWord.run(unitId, text, meaning, PHONETIC[text] ?? "", EMOJI[text] ?? "", wi).lastInsertRowid,
+        );
         if (text.includes(" ")) insWordTag.run(wordId, phraseTag.id);
       });
     });
 
-    db.prepare("INSERT INTO settings(key, value) VALUES(?, ?)").run(SEED_KEY, new Date().toISOString());
+    db.prepare(
+      "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    ).run(SEED_KEY, new Date().toISOString());
     db.exec("COMMIT");
   } catch (e) {
     db.exec("ROLLBACK");

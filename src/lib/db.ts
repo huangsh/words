@@ -115,7 +115,11 @@ function open(): DB {
 }
 
 export function getDb(): DB {
-  if (!globalThis.__wordsDb) globalThis.__wordsDb = open();
+  if (!globalThis.__wordsDb) {
+    globalThis.__wordsDb = open();
+  } else {
+    seedBuiltinBooks(globalThis.__wordsDb);
+  }
   return globalThis.__wordsDb;
 }
 
