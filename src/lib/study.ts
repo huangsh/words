@@ -17,6 +17,7 @@ export interface WordRow {
   example_cn: string;
   emoji: string;
   box?: number;
+  spell_eligible?: number;
 }
 
 const WORD_COLS = "w.id, w.unit_id, w.text, w.meaning, w.phonetic, w.pos, w.example, w.example_cn, w.emoji";
@@ -59,11 +60,18 @@ function shuffle<T>(arr: T[]): T[] {
 
 export type ScopeType = "unit" | "tag" | "review" | "wrong" | "grade";
 
-/** 生成学习队列：优先到期复习词，其次新词，最后未掌握的词 */
-export function buildQueue(userId: number, type: ScopeType, id: number | null, limit: number, bookId?: number) {
+/** 生成学习队列：优先到期复习词，其次新词，最后未掌握的词；拼写模式仅纳入已完成闪卡/选择/听音的词 */
+export function buildQueue(
+  userId: number,
+  type: ScopeType,
+  id: number | null,
+  limit: number,
+  bookId?: number,
+  mode?: string,
+) {
   const db = getDb();
   let where = "";
-  const args: (string | number)[] = [userId];
+  const args: (string | number)[] = [userId, userId];
   let join = "";
 
   switch (type) {
@@ -96,23 +104,32 @@ export function buildQueue(userId: number, type: ScopeType, id: number | null, l
       `SELECT ${WORD_COLS}, COALESCE(p.box, 0) AS box,
               CASE WHEN p.word_id IS NULL THEN 1
                    WHEN p.next_review_at <= datetime('now') AND p.box < ${MASTERED_BOX} THEN 0
-                   WHEN p.box < ${MASTERED_BOX} THEN 2 ELSE 3 END AS pri
+                   WHEN p.box < ${MASTERED_BOX} THEN 2 ELSE 3 END AS pri,
+              EXISTS (
+                SELECT 1 FROM study_logs sl
+                WHERE sl.user_id = ? AND sl.word_id = w.id
+                  AND sl.mode IN ('flashcard', 'quiz', 'listen')
+                  AND sl.correct = 1
+              ) AS spell_eligible
        FROM words w ${join}
        LEFT JOIN progress p ON p.word_id = w.id AND p.user_id = ?
        WHERE ${where}
        ORDER BY pri, p.next_review_at, w.sort, w.id`,
     )
-    .all(...args) as unknown as (WordRow & { pri: number })[];
+    .all(...args) as unknown as (WordRow & { pri: number; spell_eligible: number })[];
 
-  // 已全部掌握时仍允许复习（取全部）
-  const picked = rows.slice(0, limit);
-  const words = shuffle(picked).map(({ pri, ...w }) => {
+  const spellCount = rows.filter((r) => Number(r.spell_eligible) === 1).length;
+  const candidateRows = mode === "spell" ? rows.filter((r) => Number(r.spell_eligible) === 1) : rows;
+
+  const picked = candidateRows.slice(0, limit);
+  const words = shuffle(picked).map(({ pri, spell_eligible, ...w }) => {
     void pri;
+    void spell_eligible;
     return w;
   });
 
   // 干扰项：同单元 / 同册的其它单词
-  const unitIds = [...new Set(words.map((w) => w.unit_id))];
+  const unitIds = [...new Set(rows.map((w) => w.unit_id))];
   let pool: { id: number; text: string; meaning: string }[] = [];
   if (unitIds.length) {
     pool = db
@@ -123,7 +140,13 @@ export function buildQueue(userId: number, type: ScopeType, id: number | null, l
       )
       .all(...unitIds, ...unitIds) as typeof pool;
   }
-  return { words, pool, total: rows.length };
+  return {
+    words,
+    pool,
+    total: candidateRows.length,
+    spellCount,
+    scopeTotal: rows.length,
+  };
 }
 
 export function todayStats(userId: number) {

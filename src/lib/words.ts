@@ -24,10 +24,10 @@ export function cleanWord(b: WordInput, partial = false) {
   return out;
 }
 
-/** 查询单词（附带标签 id 列表与当前用户的掌握盒子） */
+/** 查询单词（附带标签 id 列表、当前用户的掌握盒子与是否解锁拼写） */
 export function listWords(opts: { unitId?: number; tagId?: number; q?: string; userId: number; limit?: number }) {
   const where: string[] = [];
-  const args: (string | number)[] = [opts.userId];
+  const args: (string | number)[] = [opts.userId, opts.userId];
   if (opts.unitId) {
     where.push("w.unit_id = ?");
     args.push(opts.unitId);
@@ -45,7 +45,13 @@ export function listWords(opts: { unitId?: number; tagId?: number; q?: string; u
       `SELECT w.id, w.unit_id, w.text, w.meaning, w.phonetic, w.pos, w.example, w.example_cn, w.emoji, w.sort,
               u.name AS unit_name, u.grade, u.term, b.name AS book_name,
               COALESCE(p.box, -1) AS box,
-              (SELECT GROUP_CONCAT(tag_id) FROM word_tags WHERE word_id = w.id) AS tag_ids
+              (SELECT GROUP_CONCAT(tag_id) FROM word_tags WHERE word_id = w.id) AS tag_ids,
+              EXISTS (
+                SELECT 1 FROM study_logs sl
+                WHERE sl.user_id = ? AND sl.word_id = w.id
+                  AND sl.mode IN ('flashcard', 'quiz', 'listen')
+                  AND sl.correct = 1
+              ) AS spell_unlocked
        FROM words w
        JOIN units u ON u.id = w.unit_id
        JOIN books b ON b.id = u.book_id
@@ -54,6 +60,10 @@ export function listWords(opts: { unitId?: number; tagId?: number; q?: string; u
        ORDER BY u.book_id, u.grade, u.term = '下', u.sort, w.sort, w.id
        LIMIT ${opts.limit ?? 2000}`,
     )
-    .all(...args) as (Record<string, unknown> & { tag_ids: string | null })[];
-  return rows.map((r) => ({ ...r, tag_ids: r.tag_ids ? r.tag_ids.split(",").map(Number) : [] }));
+    .all(...args) as (Record<string, unknown> & { tag_ids: string | null; spell_unlocked: number })[];
+  return rows.map((r) => ({
+    ...r,
+    tag_ids: r.tag_ids ? r.tag_ids.split(",").map(Number) : [],
+    spell_unlocked: Boolean(r.spell_unlocked),
+  }));
 }

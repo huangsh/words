@@ -11,5 +11,6 @@ export const GET = route("any", ({ req, user }) => {
   if ((type === "unit" || type === "tag" || type === "grade") && !id) throw new HttpError(400, "缺少参数");
   const limit = Math.max(3, Math.min(50, Number(sp.get("limit")) || 10));
   const bookId = Number(sp.get("bookId")) || undefined;
-  return ok(buildQueue(user.id, type, id, limit, bookId));
+  const mode = sp.get("mode") || undefined;
+  return ok(buildQueue(user.id, type, id, limit, bookId, mode));
 });

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Flame, Headphones, Layers, ListChecks, LogOut, RotateCcw, Settings, Sparkles, SpellCheck, Star, Volume2 } from "lucide-react";
 import { Button, Empty, Loading, Modal, ProgressBar } from "@/components/ui";
+import { useToast } from "@/components/Toast";
 import type { Tag } from "@/components/WordEditor";
 import { api, useApi } from "@/lib/client";
 import { BOX_COLORS, BOX_LABELS, gradeLabel } from "@/lib/constants";
@@ -34,6 +35,7 @@ interface WordItem {
   phonetic: string;
   emoji: string;
   box: number;
+  spell_unlocked?: boolean;
 }
 
 const MODES = [
@@ -45,6 +47,7 @@ const MODES = [
 
 export default function LearnHomePage() {
   const router = useRouter();
+  const toast = useToast();
   const meQ = useApi<MeData>("/api/me");
   const booksQ = useApi<{ books: Book[] }>("/api/books");
   const tagsQ = useApi<{ tags: Tag[] }>("/api/tags");
@@ -54,6 +57,11 @@ export default function LearnHomePage() {
   const [scope, setScope] = useState<{ type: string; id?: number; title: string; count: number } | null>(null);
   const [previewUnit, setPreviewUnit] = useState<Unit | null>(null);
   const unitWordsQ = useApi<{ words: WordItem[] }>(previewUnit ? `/api/words?unitId=${previewUnit.id}` : null);
+
+  const spellInfoQ = useApi<{ total: number; spellCount: number; scopeTotal: number }>(
+    scope ? `/api/study/queue?type=${scope.type}&id=${scope.id ?? ""}&bookId=${bookId ?? ""}&limit=1&mode=spell` : null,
+  );
+  const unlockedSpellCount = spellInfoQ.data?.total ?? 0;
 
   useEffect(() => {
     if (!bookId && booksQ.data?.books.length) setBookId(booksQ.data.books[0].id);
@@ -312,20 +320,45 @@ export default function LearnHomePage() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {MODES.map((m) => {
             const Icon = m.icon;
+            const isSpell = m.key === "spell";
+            const isLocked = isSpell && !spellInfoQ.loading && spellInfoQ.data !== undefined && unlockedSpellCount === 0;
+
+            const handleClick = () => {
+              if (isLocked) {
+                toast("拼写挑战需要先完成闪卡认词、四选一或听音选词中任意一项，先去认词吧！", "info");
+                return;
+              }
+              startMode(m.key, Math.min(isSpell ? unlockedSpellCount || 12 : scope?.count || 12, 15));
+            };
+
+            let desc = m.desc;
+            if (isSpell) {
+              if (spellInfoQ.loading) {
+                desc = "正在检查已认词进度…";
+              } else if (unlockedSpellCount === 0) {
+                desc = "🔒 需先完成认词后解锁";
+              } else {
+                desc = `已解锁 ${unlockedSpellCount} 词可拼写`;
+              }
+            }
+
             return (
               <motion.button
                 key={m.key}
                 whileTap={{ scale: 0.96 }}
-                onClick={() => startMode(m.key, Math.min(scope?.count || 12, 15))}
-                className={`btn-3d ${m.color} flex items-center gap-3.5 rounded-3xl p-4 text-left text-white`}
-                style={{ ["--shadow-color" as string]: m.shadow }}
+                onClick={handleClick}
+                className={`btn-3d ${isLocked ? "bg-slate-400 opacity-80" : m.color} flex items-center gap-3.5 rounded-3xl p-4 text-left text-white`}
+                style={{ ["--shadow-color" as string]: isLocked ? "#94a3b8" : m.shadow }}
               >
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/25">
                   <Icon size={26} />
                 </div>
-                <div>
-                  <div className="text-lg font-black">{m.title}</div>
-                  <div className="text-xs opacity-90">{m.desc}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 text-lg font-black">
+                    <span>{m.title}</span>
+                    {isLocked && <span className="text-sm">🔒</span>}
+                  </div>
+                  <div className="truncate text-xs opacity-90">{desc}</div>
                 </div>
               </motion.button>
             );
@@ -352,12 +385,23 @@ export default function LearnHomePage() {
                     {w.phonetic && <span className="ml-2 text-sm text-ink-soft">{w.phonetic}</span>}
                     <div className="text-sm text-ink-soft">{w.meaning}</div>
                   </div>
-                  <span
-                    className="rounded-full px-2.5 py-0.5 text-xs font-bold"
-                    style={{ background: BOX_COLORS[b] + "33", color: b === 0 ? "#64748b" : "#1e293b" }}
-                  >
-                    {BOX_LABELS[b]}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {w.spell_unlocked ? (
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-600">
+                        ✍️ 可拼写
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-400">
+                        🔒 需先认词
+                      </span>
+                    )}
+                    <span
+                      className="rounded-full px-2.5 py-0.5 text-xs font-bold"
+                      style={{ background: BOX_COLORS[b] + "33", color: b === 0 ? "#64748b" : "#1e293b" }}
+                    >
+                      {BOX_LABELS[b]}
+                    </span>
+                  </div>
                 </div>
               );
             })}

@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS study_logs (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_logs_user_day ON study_logs(user_id, day);
+CREATE INDEX IF NOT EXISTS idx_logs_user_word_mode ON study_logs(user_id, word_id, mode, correct);
 `;
 
 declare global {

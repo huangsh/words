@@ -28,6 +28,8 @@ interface QueueData {
   words: QueueWord[];
   pool: PoolItem[];
   total: number;
+  spellCount?: number;
+  scopeTotal?: number;
 }
 
 export default function SessionPage() {
@@ -48,7 +50,7 @@ function SessionInner() {
   const limit = sp.get("limit") || "12";
   const title = sp.get("title") || "背单词";
 
-  const queryUrl = `/api/study/queue?type=${type}&id=${id}&bookId=${bookId}&limit=${limit}`;
+  const queryUrl = `/api/study/queue?type=${type}&id=${id}&bookId=${bookId}&limit=${limit}&mode=${mode}`;
   const { data, loading, reload } = useApi<QueueData>(queryUrl);
 
   const [queue, setQueue] = useState<(QueueWord & { retry?: boolean })[]>([]);
@@ -100,6 +102,38 @@ function SessionInner() {
 
   if (loading || !data) return <Loading text="正在生成闯关题目…" />;
   if (!data.words.length) {
+    if (mode === "spell") {
+      return (
+        <div className="flex min-h-dvh flex-col items-center justify-center p-6 text-center">
+          <Empty icon="🔒" title="拼写挑战暂未解锁">
+            <p className="mt-2 max-w-sm text-sm text-ink-soft">
+              需要在单词完成「闪卡认词」、「四选一」或「听音选词」中任意一项认词成功后，才能开启拼写挑战哦！
+            </p>
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row">
+              <Button
+                variant="primary"
+                onClick={() => {
+                  const qs = new URLSearchParams({
+                    type,
+                    id,
+                    bookId,
+                    limit,
+                    mode: "flashcard",
+                    title,
+                  });
+                  router.replace(`/learn/session?${qs.toString()}`);
+                }}
+              >
+                👉 先去闪卡认词
+              </Button>
+              <Button variant="secondary" onClick={() => router.push("/learn")}>
+                返回首页
+              </Button>
+            </div>
+          </Empty>
+        </div>
+      );
+    }
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center p-6">
         <Empty icon="🎉" title="没有需要练习的单词啦">
