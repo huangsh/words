@@ -911,7 +911,7 @@ export default function LearnHomePage() {
         open={!!selectedExplainWord}
         onClose={() => setSelectedExplainWord(null)}
         word={selectedExplainWord}
-        onCacheExplain={(wordId, rawJson) => {
+        onCacheExplain={() => {
           reloadWords();
           if (previewUnit) {
             pollBatchStatus(previewUnit.id);

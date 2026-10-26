@@ -1,7 +1,7 @@
 "use client";
 import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Check, CheckSquare, Eye, EyeOff, FileText, Headphones, HelpCircle, Layers, Printer, RefreshCw, Shuffle, Sparkles } from "lucide-react";
+import { ArrowLeft, Printer, Shuffle } from "lucide-react";
 import { useApi } from "@/lib/client";
 import { Button, Loading } from "@/components/ui";
 

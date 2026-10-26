@@ -2,7 +2,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Delete, Eye, EyeOff, HelpCircle, Keyboard, RefreshCw, RotateCcw, Settings, Sparkles, Star, Volume2, X } from "lucide-react";
+import { Check, Delete, HelpCircle, Keyboard, RotateCcw, Sparkles, Star, Volume2, X } from "lucide-react";
 import { Button, Empty, Loading, Modal, ProgressBar } from "@/components/ui";
 import { AiExplainModal } from "@/components/AiExplainModal";
 import { api, useApi } from "@/lib/client";

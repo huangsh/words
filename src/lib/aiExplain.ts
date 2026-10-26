@@ -283,7 +283,7 @@ export function parseAiResponse(data: {
     throw new HttpError(502, "AI 接口未返回有效构词拆解内容，请重试");
   }
 
-  let parsedJson: Record<string, any> | null = null;
+  let parsedJson: Record<string, unknown> | null = null;
 
   try {
     parsedJson = JSON.parse(content);
@@ -309,56 +309,59 @@ export function parseAiResponse(data: {
     }
   }
 
+  const pObj = parsedJson as Record<string, Record<string, unknown>> | null;
   if (
-    !parsedJson ||
-    typeof parsedJson !== "object" ||
-    !parsedJson.etymology ||
-    !parsedJson.evolution ||
-    !parsedJson.cognates
+    !pObj ||
+    typeof pObj !== "object" ||
+    !pObj.etymology ||
+    !pObj.evolution ||
+    !pObj.cognates
   ) {
     throw new HttpError(502, "AI 返回的拆解格式无法解析为有效构词数据，请点击重新生成");
   }
 
   // 规范化 etymology
-  const rawParts = Array.isArray(parsedJson.etymology?.parts) ? parsedJson.etymology.parts : [];
-  const normalizedParts = rawParts.map((p: any) => {
+  const rawParts = Array.isArray(pObj.etymology?.parts) ? pObj.etymology.parts : [];
+  const normalizedParts = rawParts.map((p: unknown) => {
     if (typeof p === "string") return { affix: p, type: "", meaning: "" };
+    const obj = p && typeof p === "object" ? (p as Record<string, unknown>) : {};
     return {
-      affix: String(p?.affix || p?.part || p?.component || p?.name || ""),
-      type: String(p?.type || ""),
-      meaning: String(p?.meaning || p?.desc || p?.definition || ""),
+      affix: String(obj.affix || obj.part || obj.component || obj.name || ""),
+      type: String(obj.type || ""),
+      meaning: String(obj.meaning || obj.desc || obj.definition || ""),
     };
   });
 
   // 规范化 cognates.words
-  const rawWords = Array.isArray(parsedJson.cognates?.words) ? parsedJson.cognates.words : [];
-  const normalizedWords = rawWords.map((cw: any) => {
+  const rawWords = Array.isArray(pObj.cognates?.words) ? pObj.cognates.words : [];
+  const normalizedWords = rawWords.map((cw: unknown) => {
     if (typeof cw === "string") {
       return { word: cw, pos: "", meaning: "", breakdown: "" };
     }
+    const obj = cw && typeof cw === "object" ? (cw as Record<string, unknown>) : {};
     return {
-      word: String(cw?.word || cw?.text || cw?.name || ""),
-      pos: String(cw?.pos || ""),
-      meaning: String(cw?.meaning || cw?.desc || cw?.definition || ""),
-      breakdown: String(cw?.breakdown || cw?.formula || cw?.relation || ""),
+      word: String(obj.word || obj.text || obj.name || ""),
+      pos: String(obj.pos || ""),
+      meaning: String(obj.meaning || obj.desc || obj.definition || ""),
+      breakdown: String(obj.breakdown || obj.formula || obj.relation || ""),
     };
   });
 
   const result: AiExplainResult = {
     etymology: {
-      formula: String(parsedJson.etymology?.formula || ""),
+      formula: String(pObj.etymology?.formula || ""),
       parts: normalizedParts,
-      literal: String(parsedJson.etymology?.literal || ""),
+      literal: String(pObj.etymology?.literal || ""),
     },
     evolution: {
-      origin: String(parsedJson.evolution?.origin || ""),
-      development: String(parsedJson.evolution?.development || ""),
-      usage: String(parsedJson.evolution?.usage || ""),
+      origin: String(pObj.evolution?.origin || ""),
+      development: String(pObj.evolution?.development || ""),
+      usage: String(pObj.evolution?.usage || ""),
     },
     cognates: {
-      root: String(parsedJson.cognates?.root || ""),
+      root: String(pObj.cognates?.root || ""),
       words: normalizedWords,
-      mnemonic: String(parsedJson.cognates?.mnemonic || ""),
+      mnemonic: String(pObj.cognates?.mnemonic || ""),
     },
   };
 

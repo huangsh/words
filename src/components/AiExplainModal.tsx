@@ -1,8 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import {
-  ChevronDown,
-  ChevronUp,
   Eye,
   EyeOff,
   RefreshCw,
