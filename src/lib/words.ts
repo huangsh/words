@@ -45,6 +45,8 @@ export function listWords(opts: { unitId?: number; tagId?: number; q?: string; u
   const rows = getDb()
     .prepare(
       `SELECT w.id, w.unit_id, w.text, w.meaning, w.phonetic, w.pos, w.example, w.example_cn, w.emoji, w.synonyms, w.word_family, w.sort,
+              (w.ai_explain IS NOT NULL AND LENGTH(w.ai_explain) > 10) AS has_ai_explain,
+              w.ai_explain,
               u.name AS unit_name, u.grade, u.term, b.name AS book_name,
               COALESCE(p.box, -1) AS box,
               (SELECT GROUP_CONCAT(tag_id) FROM word_tags WHERE word_id = w.id) AS tag_ids,
@@ -102,6 +104,8 @@ export function listWords(opts: { unitId?: number; tagId?: number; q?: string; u
     const spell_done = Boolean(r.spell_done);
     return {
       ...r,
+      has_ai_explain: Boolean(r.has_ai_explain),
+      ai_explain: (r.ai_explain as string) || undefined,
       tag_ids: r.tag_ids ? r.tag_ids.split(",").map(Number) : [],
       flashcard_done,
       quiz_done,

@@ -39,8 +39,8 @@ export default function LoginPage() {
     if (!picked || !password) return;
     setBusy(true);
     try {
-      const r = await api<{ role: string }>("/api/auth/login", { body: { userId: picked.id, password } });
-      router.replace(r.role === "parent" ? "/admin" : "/learn");
+      await api<{ role: string }>("/api/auth/login", { body: { userId: picked.id, password } });
+      router.replace("/learn");
     } catch (err) {
       setShake((s) => s + 1);
       setPassword("");

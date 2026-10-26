@@ -2,9 +2,10 @@
 import { motion } from "motion/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, FileText, Flame, Headphones, Layers, ListChecks, LogOut, Printer, RotateCcw, Settings, SlidersHorizontal, Sparkles, SpellCheck, Star, Volume2 } from "lucide-react";
 import { Button, Empty, Loading, Modal, ProgressBar } from "@/components/ui";
+import { AiExplainModal } from "@/components/AiExplainModal";
 import { useToast } from "@/components/Toast";
 import type { Tag } from "@/components/WordEditor";
 import { api, useApi } from "@/lib/client";
@@ -48,6 +49,27 @@ interface WordItem {
   quiz_unlocked?: boolean;
   listen_unlocked?: boolean;
   spell_unlocked?: boolean;
+  has_ai_explain?: boolean;
+  ai_explain?: string;
+}
+
+interface BatchTaskData {
+  unitId: number;
+  total: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  currentWord?: string;
+  status: "running" | "completed" | "error" | "cancelled";
+  error?: string;
+}
+
+interface BatchExplainStatus {
+  unitId: number;
+  totalWords: number;
+  explainedWords: number;
+  unexplainedWords: number;
+  task?: BatchTaskData;
 }
 
 const ALL_MODES_CONFIG = [
@@ -158,6 +180,94 @@ export default function LearnHomePage() {
   const [previewUnit, setPreviewUnit] = useState<Unit | null>(null);
   const unitWordsQ = useApi<{ words: WordItem[] }>(previewUnit ? `/api/words?unitId=${previewUnit.id}` : null);
 
+  const [batchStatus, setBatchStatus] = useState<BatchExplainStatus | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [selectedExplainWord, setSelectedExplainWord] = useState<WordItem | null>(null);
+
+  const pollBatchStatus = useCallback(async (unitId: number) => {
+    try {
+      const res = await api<BatchExplainStatus>(`/api/words/explain/batch?unitId=${unitId}`);
+      setBatchStatus(res);
+      return res;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const reloadWords = unitWordsQ.reload;
+
+  useEffect(() => {
+    if (!previewUnit) {
+      setBatchStatus(null);
+      return;
+    }
+
+    let timer: NodeJS.Timeout | null = null;
+    let isMounted = true;
+    let prevRunning = false;
+
+    const check = async () => {
+      const res = await pollBatchStatus(previewUnit.id);
+      if (!isMounted) return;
+      const isRunning = res?.task?.status === "running";
+      if (prevRunning && !isRunning) {
+        reloadWords();
+        if (res?.task?.status === "completed") {
+          toast(`批量 AI 拆解已完成！成功 ${res.task.succeeded} 词`, "success");
+        } else if (res?.task?.status === "error") {
+          toast(res.task.error || "批量 AI 拆解出错", "error");
+        }
+      }
+      prevRunning = Boolean(isRunning);
+
+      if (isRunning) {
+        timer = setTimeout(check, 1200);
+      }
+    };
+
+    check();
+
+    return () => {
+      isMounted = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [previewUnit, pollBatchStatus, reloadWords, toast]);
+
+  const handleStartBatchExplain = async (force: boolean = false) => {
+    if (!previewUnit) return;
+    setBatchLoading(true);
+    try {
+      const res = await api<{ task?: BatchTaskData; message?: string; alreadyRunning?: boolean }>(
+        "/api/words/explain/batch",
+        {
+          method: "POST",
+          body: JSON.stringify({ unitId: previewUnit.id, force }),
+        },
+      );
+      if (res.message) {
+        toast(res.message, "info");
+      } else {
+        toast("已启动后台批量 AI 拆解，请稍候...", "success");
+      }
+      await pollBatchStatus(previewUnit.id);
+    } catch (err) {
+      toast((err as Error).message, "error");
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  const handleCancelBatchExplain = async () => {
+    if (!previewUnit) return;
+    try {
+      await api(`/api/words/explain/batch?unitId=${previewUnit.id}`, { method: "DELETE" });
+      toast("已取消后台批量任务", "info");
+      await pollBatchStatus(previewUnit.id);
+    } catch (err) {
+      toast((err as Error).message, "error");
+    }
+  };
+
   const scopeInfoQ = useApi<{
     total: number;
     scopeTotal: number;
@@ -248,6 +358,16 @@ export default function LearnHomePage() {
           <div className="flex items-center gap-1 rounded-2xl bg-white px-3 py-1.5 text-sm font-black text-coral-500 shadow-sm">
             <Flame size={17} fill="currentColor" /> {stats.streak}
           </div>
+          {user.role === "parent" && (
+            <Link
+              href="/admin"
+              className="rounded-2xl bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm hover:text-brand-600 transition flex items-center gap-1.5"
+              title="家长管理后台（词库与模式设置）"
+            >
+              <span>🛠️</span>
+              <span className="hidden sm:inline">管理</span>
+            </Link>
+          )}
           <button
             onClick={() => setSettingsOpen(true)}
             className="rounded-2xl bg-white p-2.5 text-ink-soft shadow-sm hover:text-ink transition"
@@ -558,10 +678,104 @@ export default function LearnHomePage() {
 
       {/* 单元词表预览弹窗 */}
       <Modal open={!!previewUnit} onClose={() => setPreviewUnit(null)} title={previewUnit?.name} wide>
+        {/* 批量 AI 解释进度/操作卡片 */}
+        {batchStatus && (
+          <div className="mb-3 rounded-2xl border border-purple-100 bg-gradient-to-r from-purple-50/70 via-indigo-50/50 to-blue-50/60 p-3">
+            {batchStatus.task && batchStatus.task.status === "running" ? (
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-purple-600 text-white animate-spin">
+                      <RotateCcw size={14} />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-bold text-slate-800">
+                          AI 深度拆解生成中 ({batchStatus.task.processed}/{batchStatus.task.total})
+                        </span>
+                        <span className="rounded bg-purple-100 px-1.5 py-0.2 text-[10px] font-semibold text-purple-700">
+                          后台运行中
+                        </span>
+                      </div>
+                      {batchStatus.task.currentWord && (
+                        <div className="truncate text-[11px] text-purple-700 font-medium">
+                          正在解析：<span className="font-bold underline">{batchStatus.task.currentWord}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleCancelBatchExplain}
+                    className="shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold text-rose-500 hover:bg-rose-50 transition"
+                  >
+                    终止任务
+                  </button>
+                </div>
+                <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-purple-200/50">
+                  <div
+                    className="h-full bg-gradient-to-r from-purple-500 to-indigo-600 transition-all duration-300"
+                    style={{
+                      width: `${Math.max(
+                        5,
+                        Math.round((batchStatus.task.processed / (batchStatus.task.total || 1)) * 100),
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-purple-100 text-purple-600">
+                    <Sparkles size={15} />
+                  </span>
+                  <div>
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                      <span>AI 词源拆解助记</span>
+                      <span className="rounded-full bg-purple-100/80 px-2 py-0.2 text-[10px] font-semibold text-purple-700">
+                        已覆盖 {batchStatus.explainedWords}/{batchStatus.totalWords} 词
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {batchStatus.unexplainedWords > 0
+                        ? `还有 ${batchStatus.unexplainedWords} 个单词未生成拆解，可一键批量后台生成`
+                        : "本单元所有单词均已完成 AI 构词深度拆解与助记！"}
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={batchLoading}
+                  onClick={() => {
+                    if (batchStatus.unexplainedWords === 0) {
+                      if (confirm("本单元全部单词已生成拆解，是否全部重新生成？")) {
+                        handleStartBatchExplain(true);
+                      }
+                    } else {
+                      handleStartBatchExplain(false);
+                    }
+                  }}
+                  className="shrink-0 gap-1 border-purple-200 bg-white/80 text-purple-700 hover:bg-purple-100/80 text-xs py-1 px-3"
+                >
+                  <Sparkles size={13} className="text-purple-600" />
+                  <span>
+                    {batchLoading
+                      ? "启动中..."
+                      : batchStatus.unexplainedWords > 0
+                        ? `批量AI解释 (${batchStatus.unexplainedWords})`
+                        : "全部重新生成"}
+                  </span>
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
         {unitWordsQ.loading ? (
           <Loading />
         ) : (
-          <div className="max-h-[60dvh] divide-y divide-slate-100 overflow-y-auto">
+          <div className="max-h-[58dvh] divide-y divide-slate-100 overflow-y-auto">
             {unitWordsQ.data?.words.map((w) => {
               const b = Math.max(0, w.box);
               return (
@@ -570,7 +784,7 @@ export default function LearnHomePage() {
                     <Volume2 size={18} />
                   </button>
                   <span className="w-8 text-center text-2xl">{w.emoji}</span>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="font-word text-lg font-bold">{w.text}</span>
                       {w.pos && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-semibold text-ink-soft">{w.pos}</span>}
@@ -597,7 +811,25 @@ export default function LearnHomePage() {
                       return null;
                     })()}
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {/* AI 拆解查看/生成按钮 */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedExplainWord(w);
+                      }}
+                      className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold transition ${
+                        w.has_ai_explain || w.ai_explain
+                          ? "bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200/60"
+                          : "bg-slate-100/80 text-slate-500 hover:bg-purple-50 hover:text-purple-600 border border-slate-200/50"
+                      }`}
+                      title={w.has_ai_explain || w.ai_explain ? "查看 AI 构词拆解" : "点击生成 AI 构词拆解"}
+                    >
+                      <Sparkles size={11} className={w.has_ai_explain || w.ai_explain ? "text-purple-600" : "text-slate-400"} />
+                      <span>{w.has_ai_explain || w.ai_explain ? "AI拆解" : "AI解析"}</span>
+                    </button>
+
                     {w.spell_unlocked ? (
                       <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-600">
                         ✍️ 可拼写
@@ -623,7 +855,7 @@ export default function LearnHomePage() {
             })}
           </div>
         )}
-        <div className="mt-4 flex gap-2.5">
+        <div className="mt-4 flex flex-col sm:flex-row gap-2.5">
           <Button
             size="lg"
             variant="secondary"
@@ -638,6 +870,30 @@ export default function LearnHomePage() {
           </Button>
           <Button
             size="lg"
+            variant="secondary"
+            disabled={batchLoading || batchStatus?.task?.status === "running"}
+            onClick={() => {
+              if (batchStatus && batchStatus.unexplainedWords === 0) {
+                if (confirm("本单元全部单词已生成拆解，是否全部重新生成？")) {
+                  handleStartBatchExplain(true);
+                }
+              } else {
+                handleStartBatchExplain(false);
+              }
+            }}
+            className="flex-1 gap-1.5 border-purple-200 bg-purple-50/70 text-purple-700 hover:bg-purple-100 hover:text-purple-800"
+          >
+            <Sparkles size={18} className="text-purple-600" />
+            <span>
+              {batchStatus?.task?.status === "running"
+                ? `后台解释中 (${batchStatus.task.processed}/${batchStatus.task.total})`
+                : batchStatus && batchStatus.unexplainedWords > 0
+                  ? `批量AI解释 (${batchStatus.unexplainedWords}词)`
+                  : "批量AI解释"}
+            </span>
+          </Button>
+          <Button
+            size="lg"
             className="flex-1"
             onClick={() => {
               const u = previewUnit!;
@@ -649,6 +905,19 @@ export default function LearnHomePage() {
           </Button>
         </div>
       </Modal>
+
+      {/* 单词 AI 构词深度拆解弹窗 */}
+      <AiExplainModal
+        open={!!selectedExplainWord}
+        onClose={() => setSelectedExplainWord(null)}
+        word={selectedExplainWord}
+        onCacheExplain={(wordId, rawJson) => {
+          reloadWords();
+          if (previewUnit) {
+            pollBatchStatus(previewUnit.id);
+          }
+        }}
+      />
 
       {/* 学习设置弹窗 */}
       <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} title="⚙️ 学习设置">
@@ -753,14 +1022,24 @@ export default function LearnHomePage() {
 
           {/* 家长管理后台快捷入口 */}
           {user?.role === "parent" && (
-            <div className="pt-3 border-t border-slate-100">
+            <div className="pt-3 border-t border-slate-100 space-y-2">
+              <Link
+                href="/admin/settings"
+                className="flex items-center justify-between rounded-2xl bg-brand-50 px-4 py-3 text-sm font-bold text-brand-700 hover:bg-brand-100 transition border border-brand-200"
+              >
+                <div className="flex items-center gap-2">
+                  <span>🎯</span>
+                  <span>学习模式与多成员闯关设置</span>
+                </div>
+                <span className="text-xs text-brand-600 font-semibold">去配置 →</span>
+              </Link>
               <Link
                 href="/admin"
                 className="flex items-center justify-between rounded-2xl bg-slate-100/80 px-4 py-3 text-sm font-bold text-ink hover:bg-slate-200/80 transition"
               >
                 <div className="flex items-center gap-2">
-                  <span>🛠️</span>
-                  <span>进入词库与成员管理后台</span>
+                  <span>📚</span>
+                  <span>词库与成员管理后台</span>
                 </div>
                 <span className="text-xs text-ink-soft">进入 →</span>
               </Link>

@@ -7,5 +7,5 @@ export default async function Home() {
   if (!hasUsers()) redirect("/login");
   const user = await getSessionUser();
   if (!user) redirect("/login");
-  redirect(user.role === "parent" ? "/admin" : "/learn");
+  redirect("/learn");
 }

@@ -97,9 +97,28 @@ export const SYSTEM_MODES: SystemMode[] = [
   { key: "spell", title: "拼写挑战", desc: "全键盘拼出完整单词", iconName: "SpellCheck", color: "bg-grape-500", shadow: "#7c3aed", required: false },
 ];
 
-/** 获取当前系统启用的学习模式列表（严格保证 flashcard 在首位且必开启） */
-export function getEnabledModes(dbInstance?: DB): string[] {
+/** 获取启用的学习模式列表（支持按用户独立定制，严格保证 flashcard 在首位且必开启） */
+export function getEnabledModes(dbInstance?: DB, userId?: number): string[] {
   const db = dbInstance ?? getDb();
+
+  // 若传入特定用户 ID，优先查询该用户的个性化定制模式
+  if (userId && userId > 0) {
+    const userRow = db
+      .prepare("SELECT value FROM settings WHERE key = ?")
+      .get(`user_modes_${userId}`) as { value: string } | undefined;
+    if (userRow?.value) {
+      try {
+        const list = JSON.parse(userRow.value);
+        if (Array.isArray(list) && list.length > 0) {
+          const set = new Set(list);
+          const valid = SYSTEM_MODES.map((m) => m.key).filter((k) => k === "flashcard" || set.has(k));
+          if (valid.length > 0) return valid;
+        }
+      } catch {}
+    }
+  }
+
+  // 回退至系统全局默认设置
   const row = db.prepare("SELECT value FROM settings WHERE key = 'enabled_modes'").get() as { value: string } | undefined;
   if (!row?.value) {
     return ["flashcard", "quiz", "listen", "cloze", "spell"];
@@ -115,17 +134,47 @@ export function getEnabledModes(dbInstance?: DB): string[] {
   return ["flashcard", "quiz", "listen", "cloze", "spell"];
 }
 
-/** 家长更新系统启用的学习模式（flashcard 强制保留） */
-export function setEnabledModes(modes: string[]): string[] {
+/** 家长更新启用的学习模式（支持全局设置或针对特定用户定制） */
+export function setEnabledModes(modes: string[], userId?: number): string[] {
   const set = new Set(modes);
   set.add("flashcard");
   const filtered = SYSTEM_MODES.map((m) => m.key).filter((k) => set.has(k));
   const val = JSON.stringify(filtered);
   const db = getDb();
+  const key = userId && userId > 0 ? `user_modes_${userId}` : "enabled_modes";
   db.prepare(
-    "INSERT INTO settings(key, value) VALUES('enabled_modes', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-  ).run(val);
+    "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+  ).run(key, val);
   return filtered;
+}
+
+/** 重置特定用户的定制模式，恢复为跟随全局默认 */
+export function resetUserModes(userId: number, dbInstance?: DB): void {
+  const db = dbInstance ?? getDb();
+  db.prepare("DELETE FROM settings WHERE key = ?").run(`user_modes_${userId}`);
+}
+
+/** 获取所有单独定制了模式的用户 ID 及其模式映射 */
+export function getAllUsersModes(dbInstance?: DB): Record<number, string[]> {
+  const db = dbInstance ?? getDb();
+  const rows = db.prepare("SELECT key, value FROM settings WHERE key LIKE 'user_modes_%'").all() as {
+    key: string;
+    value: string;
+  }[];
+  const map: Record<number, string[]> = {};
+  for (const r of rows) {
+    const uid = Number(r.key.replace("user_modes_", ""));
+    if (uid > 0 && r.value) {
+      try {
+        const list = JSON.parse(r.value);
+        if (Array.isArray(list)) {
+          const set = new Set(list);
+          map[uid] = SYSTEM_MODES.map((m) => m.key).filter((k) => k === "flashcard" || set.has(k));
+        }
+      } catch {}
+    }
+  }
+  return map;
 }
 
 export type ScopeType = "unit" | "tag" | "review" | "wrong" | "grade";
@@ -142,7 +191,7 @@ export function buildQueue(
   mode?: string,
 ) {
   const db = getDb();
-  const enabledModes = getEnabledModes(db);
+  const enabledModes = getEnabledModes(db, userId);
 
   let where = "";
   // 5 个 EXISTS (flashcard, quiz, listen, cloze, spell) + 1 个 LEFT JOIN progress

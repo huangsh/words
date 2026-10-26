@@ -37,6 +37,72 @@ interface Book {
 
 type PrintMode = "zh_to_en" | "en_to_zh" | "dictation";
 
+/** 小学生英语规范书写·四线三格组件（四线全采用矢量高精度虚线） */
+function FourLineGrid({ height = "md" }: { height?: "md" | "lg" }) {
+  const isLg = height === "lg";
+  const h = isLg ? 38 : 32;
+  const y1 = 1;
+  const y2 = isLg ? 13 : 11;
+  const y3 = isLg ? 25 : 21;
+  const y4 = isLg ? 37 : 31;
+
+  return (
+    <svg
+      className="w-full block select-none"
+      height={h}
+      viewBox={`0 0 100 ${h}`}
+      preserveAspectRatio="none"
+      style={{ printColorAdjust: "exact", WebkitPrintColorAdjust: "exact" }}
+      aria-label="四线三格规范书写区（四线均用虚线）"
+    >
+      {/* 第 1 线：顶线（虚线） */}
+      <line
+        x1="0"
+        y1={y1}
+        x2="100"
+        y2={y1}
+        stroke="#94a3b8"
+        strokeWidth="1"
+        strokeDasharray="4 3"
+        vectorEffect="non-scaling-stroke"
+      />
+      {/* 第 2 线：中腰线（虚线） */}
+      <line
+        x1="0"
+        y1={y2}
+        x2="100"
+        y2={y2}
+        stroke="#94a3b8"
+        strokeWidth="1"
+        strokeDasharray="4 3"
+        vectorEffect="non-scaling-stroke"
+      />
+      {/* 第 3 线：基准线（虚线，颜色稍深方便孩子端正坐落字母） */}
+      <line
+        x1="0"
+        y1={y3}
+        x2="100"
+        y2={y3}
+        stroke="#64748b"
+        strokeWidth="1.2"
+        strokeDasharray="4 3"
+        vectorEffect="non-scaling-stroke"
+      />
+      {/* 第 4 线：底线下沉线（虚线） */}
+      <line
+        x1="0"
+        y1={y4}
+        x2="100"
+        y2={y4}
+        stroke="#94a3b8"
+        strokeWidth="1"
+        strokeDasharray="4 3"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+
 export default function PrintPage() {
   return (
     <Suspense fallback={<Loading text="正在准备练习卷…" />}>
@@ -67,6 +133,8 @@ function PrintWorksheetInner() {
   const [columns, setColumns] = useState<2 | 3>(2); // 2 列或 3 列
   const [randomize, setRandomize] = useState(false); // 随机乱序
   const [randomSeed, setRandomSeed] = useState(0);
+  const [lineStyle, setLineStyle] = useState<"four_lines" | "single_line">("four_lines"); // 书写格线格式：四线三格 / 单横线
+  const [gridHeight, setGridHeight] = useState<"md" | "lg">("md"); // 格高：md(32px 标准) / lg(38px 加宽大格)
 
   // 数据查询
   const booksQ = useApi<{ books: Book[] }>("/api/books");
@@ -260,6 +328,36 @@ function PrintWorksheetInner() {
                   />
                   <span>附答案表</span>
                 </label>
+                {(mode === "zh_to_en" || mode === "dictation") && (
+                  <>
+                    <label
+                      className="inline-flex items-center gap-1.5 cursor-pointer"
+                      title="开启标准四线三格，帮助小朋友规范英文字母书写"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={lineStyle === "four_lines"}
+                        onChange={(e) => setLineStyle(e.target.checked ? "four_lines" : "single_line")}
+                        className="rounded border-slate-300 text-brand-600 focus:ring-0"
+                      />
+                      <span className="font-bold text-brand-700">四线三格</span>
+                    </label>
+                    {lineStyle === "four_lines" && (
+                      <label
+                        className="inline-flex items-center gap-1.5 cursor-pointer"
+                        title="加宽格高（38px），适合低年级初学者端正书写"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={gridHeight === "lg"}
+                          onChange={(e) => setGridHeight(e.target.checked ? "lg" : "md")}
+                          className="rounded border-slate-300 text-brand-600 focus:ring-0"
+                        />
+                        <span>加宽大格</span>
+                      </label>
+                    )}
+                  </>
+                )}
                 {mode === "zh_to_en" && (
                   <label className="inline-flex items-center gap-1.5 cursor-pointer" title="如：m _ _ _ _ e (6字母)">
                     <input
@@ -320,9 +418,15 @@ function PrintWorksheetInner() {
               {/* 答题指导说明 */}
               <div className="mt-3 flex items-center justify-between text-xs text-slate-500 italic pb-2 border-b border-slate-200">
                 <span>
-                  {mode === "zh_to_en" && "【提示】请根据给出的中文释义与词性，在四线三格或横线上准确书写对应的英文单词。"}
+                  {mode === "zh_to_en" &&
+                    (lineStyle === "four_lines"
+                      ? "【提示】请根据给出的中文释义与词性，在四线三格内端正、规范书写对应的英文单词。"
+                      : "【提示】请根据给出的中文释义与词性，在横线上准确书写对应的英文单词。")}
                   {mode === "en_to_zh" && "【提示】请根据给出的英文单词，在横线上端正写出准确的中文释义。"}
-                  {mode === "dictation" && "【提示】家长或老师报读单词，请注意听清发音，在对应题号横线上拼写出该单词。"}
+                  {mode === "dictation" &&
+                    (lineStyle === "four_lines"
+                      ? "【提示】家长或老师报读单词，请注意听清发音，在四线三格内端正拼写出该单词。"
+                      : "【提示】家长或老师报读单词，请注意听清发音，在对应题号横线上拼写出该单词。")}
                 </span>
                 <span className="not-italic font-bold font-mono">共 {displayWords.length} 题</span>
               </div>
@@ -349,21 +453,35 @@ function PrintWorksheetInner() {
                     }
 
                     return (
-                      <div key={w.id} className="flex flex-col justify-end border-b border-slate-200/90 pb-2.5 print:break-inside-avoid">
-                        <div className="flex items-baseline gap-1.5">
-                          <span className="font-mono text-xs font-bold text-slate-400 w-6 shrink-0">{num}.</span>
-                          <span className="text-sm font-bold text-slate-800 leading-tight">
-                            {w.pos && <span className="mr-1 italic text-slate-500 font-serif font-normal">{w.pos}</span>}
-                            {w.meaning}
-                          </span>
-                        </div>
-                        {hintStr && (
-                          <div className="mt-0.5 pl-6 font-mono text-[11px] text-slate-400 tracking-wider">
-                            {hintStr}
+                      <div
+                        key={w.id}
+                        className={`flex flex-col justify-between pb-3.5 pt-1 print:break-inside-avoid ${
+                          lineStyle === "single_line" ? "border-b border-slate-200/90" : ""
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="font-mono text-xs font-bold text-slate-400 w-6 shrink-0">{num}.</span>
+                            <span className="text-sm font-bold text-slate-800 leading-tight">
+                              {w.pos && <span className="mr-1 italic text-slate-500 font-serif font-normal">{w.pos}</span>}
+                              {w.meaning}
+                            </span>
                           </div>
+                          {hintStr && (
+                            <div className="mt-0.5 pl-6 font-mono text-[11px] text-slate-400 tracking-wider">
+                              {hintStr}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 英文书写区：四线三格（端正书写）或 单横线 */}
+                        {lineStyle === "four_lines" ? (
+                          <div className="mt-2.5 w-full">
+                            <FourLineGrid height={gridHeight} />
+                          </div>
+                        ) : (
+                          <div className="mt-3.5 pl-6 border-b border-dashed border-slate-400 h-6"></div>
                         )}
-                        {/* 英文书写横线 */}
-                        <div className="mt-3.5 pl-6 border-b border-dashed border-slate-400 h-6"></div>
                       </div>
                     );
                   }
@@ -394,7 +512,19 @@ function PrintWorksheetInner() {
                     );
                   }
 
-                  // 模式 3：听写卷（家长报听写，纯保留题号与留白横线）
+                  // 模式 3：听写卷（家长报听写，纯保留题号与留白横线或四线格）
+                  if (lineStyle === "four_lines") {
+                    return (
+                      <div key={w.id} className="flex flex-col justify-end pb-3.5 pt-1 print:break-inside-avoid">
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <span className="font-mono text-xs font-bold text-slate-500 w-6 shrink-0">{num}.</span>
+                          <span className="text-[11px] text-slate-400 italic">报听写</span>
+                        </div>
+                        <FourLineGrid height={gridHeight} />
+                      </div>
+                    );
+                  }
+
                   return (
                     <div key={w.id} className="flex items-end gap-2 border-b border-slate-200/90 pb-2 print:break-inside-avoid">
                       <span className="font-mono text-sm font-bold text-slate-500 w-7 shrink-0">{num}.</span>
