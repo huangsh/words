@@ -555,15 +555,6 @@ export default function LearnHomePage() {
                       词表
                     </Button>
                     <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => router.push(`/learn/print?unitId=${u.id}&bookId=${bookId}`)}
-                      className="p-2 text-ink-soft hover:text-brand-600"
-                      title="一键生成默写/听写练习纸"
-                    >
-                      <Printer size={16} />
-                    </Button>
-                    <Button
                       size="sm"
                       className="flex-1"
                       disabled={u.word_count === 0}
