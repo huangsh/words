@@ -1,0 +1,119 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #eef6ff;
+  --color-brand-100: #d9ebff;
+  --color-brand-200: #b5d8ff;
+  --color-brand-300: #84bdff;
+  --color-brand-400: #4fa3ff;
+  --color-brand-500: #2d86f5;
+  --color-brand-600: #1b6be0;
+  --color-brand-700: #1855b4;
+
+  --color-sun-300: #ffe08a;
+  --color-sun-400: #ffd25a;
+  --color-sun-500: #ffc23c;
+  --color-sun-600: #f5a623;
+
+  --color-mint-300: #8ef0bf;
+  --color-mint-400: #5ee3a1;
+  --color-mint-500: #3dd68c;
+  --color-mint-600: #24b872;
+
+  --color-coral-300: #ffa8a8;
+  --color-coral-400: #ff8787;
+  --color-coral-500: #ff6b6b;
+  --color-coral-600: #e85151;
+
+  --color-grape-400: #a78bfa;
+  --color-grape-500: #8b5cf6;
+  --color-grape-600: #7c3aed;
+
+  --color-ink: #2b3245;
+  --color-ink-soft: #6b7389;
+  --color-cream: #fff9f0;
+
+  --font-sans: ui-rounded, "SF Pro Rounded", "Nunito", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui,
+    sans-serif;
+  --font-word: ui-rounded, "SF Pro Rounded", "Nunito", "Comic Sans MS", "Arial Rounded MT Bold", system-ui, sans-serif;
+
+  --radius-4xl: 2rem;
+}
+
+html {
+  -webkit-tap-highlight-color: transparent;
+  text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  min-height: 100dvh;
+  overscroll-behavior-y: none;
+}
+
+/* 柔和的背景气泡 */
+.bg-bubbles {
+  background:
+    radial-gradient(circle at 8% 12%, rgb(79 163 255 / 0.16) 0, transparent 28%),
+    radial-gradient(circle at 92% 8%, rgb(255 194 60 / 0.22) 0, transparent 26%),
+    radial-gradient(circle at 85% 88%, rgb(61 214 140 / 0.16) 0, transparent 30%),
+    radial-gradient(circle at 10% 92%, rgb(255 107 107 / 0.12) 0, transparent 26%),
+    var(--color-cream);
+  background-attachment: fixed;
+}
+
+/* 立体按钮 */
+.btn-3d {
+  box-shadow: 0 5px 0 0 var(--shadow-color, rgb(0 0 0 / 0.15));
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.08s ease,
+    filter 0.15s;
+}
+.btn-3d:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow: 0 1px 0 0 var(--shadow-color, rgb(0 0 0 / 0.15));
+}
+.btn-3d:hover:not(:disabled) {
+  filter: brightness(1.04);
+}
+
+.card-soft {
+  background: white;
+  border-radius: 1.75rem;
+  box-shadow:
+    0 1px 2px rgb(43 50 69 / 0.04),
+    0 8px 24px -6px rgb(43 50 69 / 0.1);
+}
+
+.font-word {
+  font-family: var(--font-word);
+  letter-spacing: 0.01em;
+}
+
+.perspective {
+  perspective: 1200px;
+}
+.backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+input,
+textarea,
+select {
+  font-size: 16px; /* 防止 iOS 聚焦时缩放 */
+}
+
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}

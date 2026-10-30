@@ -1,0 +1,11 @@
+services:
+  words:
+    build: .
+    container_name: words-app
+    restart: unless-stopped
+    ports:
+      - "8861:8861"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_PATH=/app/data/words.db
