@@ -45,3 +45,6 @@ next-env.d.ts
 *.db
 *.db-shm
 *.db-wal
+
+# local private deployment info (domain / LAN IP / SSH)
+/AGENTS.local.md
