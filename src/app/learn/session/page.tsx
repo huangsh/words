@@ -1012,7 +1012,7 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
     tapChar(nextTargetChar.toLowerCase());
   }, [chars, input.length, letterIndices, status, tapChar]);
 
-  // 支持外接键盘直接输入：字母键输入、Backspace 删除、Tab 提示、空格/R 朗读
+  // 支持外接键盘直接输入：字母键输入、Backspace 删除、Tab 提示、空格朗读
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -1024,7 +1024,7 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
       } else if (e.key === "Tab") {
         e.preventDefault();
         hint();
-      } else if (e.code === "Space" || e.key.toLowerCase() === "r" || e.key.toLowerCase() === "v") {
+      } else if (e.code === "Space") {
         e.preventDefault();
         speak(word.text);
       } else if (/^[a-zA-Z]$/.test(e.key)) {
