@@ -15,6 +15,7 @@ import { speak } from "@/lib/speech";
 interface MeData {
   user: { id: number; display_name: string; avatar: string; color: string; role: "parent" | "child"; daily_goal: number };
   stats: { todayAnswers: number; todayCorrect: number; stars: number; streak: number; reviewDue: number; wrongCount: number; learned: number; mastered: number };
+  enabledModes?: string[];
 }
 interface Book {
   id: number;
@@ -333,7 +334,8 @@ export default function LearnHomePage() {
   }
 
   if (meQ.loading || !meQ.data) return <Loading />;
-  const { user, stats } = meQ.data;
+  const { user, stats, enabledModes } = meQ.data;
+  const hasPracticeModes = (enabledModes ?? []).some((k) => k !== "flashcard");
   const activeGroup = gradeGroups.find(([k]) => k === gradeKey)?.[1];
   const goalRatio = Math.min(1, stats.todayAnswers / Math.max(1, user.daily_goal));
 
@@ -409,7 +411,13 @@ export default function LearnHomePage() {
             <div className="flex items-center gap-1.5 text-base font-extrabold text-brand-600">
               <RotateCcw size={18} /> 今日待复习
             </div>
-            <p className="mt-1 text-xs text-ink-soft">{stats.reviewDue ? "根据艾宾浩斯节奏自动安排" : "太棒啦，今天没有到期复习词"}</p>
+            <p className="mt-1 text-xs text-ink-soft">
+              {stats.reviewDue
+                ? hasPracticeModes
+                  ? "闪卡认词只是热身，还需完成一项练习才算复习完成"
+                  : "根据艾宾浩斯节奏自动安排"
+                : "太棒啦，今天没有到期复习词"}
+            </p>
           </div>
           <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-brand-100 text-2xl font-black text-brand-600">
             {stats.reviewDue}
@@ -580,6 +588,16 @@ export default function LearnHomePage() {
 
           return (
             <>
+              {scope?.type === "review" && activeModes.some((m) => m.key !== "flashcard") && (
+                <div className="mb-3 rounded-2xl border border-amber-200/70 bg-amber-50 px-3.5 py-2.5 text-xs font-bold leading-relaxed text-amber-800">
+                  💡 闪卡认词只是热身：完成「
+                  {activeModes
+                    .filter((m) => m.key !== "flashcard")
+                    .map((m) => m.title)
+                    .join(" / ")}
+                  」中的任意一项，才算完成今日复习。
+                </div>
+              )}
               <p className="mb-4 text-xs font-bold text-ink-soft leading-relaxed">
                 共 {scope?.count} 个单词，按「{pipelineTitles}」循序渐进闯关（前一阶段完成解锁下一阶段）：
               </p>

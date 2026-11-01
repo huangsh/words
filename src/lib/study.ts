@@ -42,6 +42,18 @@ export function recordAnswer(userId: number, wordId: number, mode: string, corre
       | undefined;
     const oldBox = p?.box ?? 0;
     const oldWrong = p?.wrong ?? 0;
+
+    // 闪卡认词只是“认词自评”，不参与间隔复习排期。
+    // 对已学过的词，点“认识啦”不能直接把 next_review_at 推到未来（否则会立刻从今日待复习里消失），
+    // 必须再完成四选一/听音选词/例句挖空/拼写挑战中的任意一项，才真正算完成这次复习。
+    // 新词首次认词仍照常建立进度记录，保证“已学”、解锁与统计逻辑不变。
+    // 例外：家长关闭了全部练习模式时，闪卡就是唯一的复习方式，此时仍按原逻辑推进复习计划。
+    if (mode === "flashcard" && p && getEnabledModes(db, userId).some((m) => m !== "flashcard")) {
+      db.prepare(
+        "UPDATE progress SET correct = correct + ?, last_seen_at = datetime('now') WHERE user_id = ? AND word_id = ?",
+      ).run(correct ? 1 : 0, userId, wordId);
+      return p.box;
+    }
     const box = correct ? Math.min(oldBox + 1, MASTERED_BOX) : 1;
     // 答错：10 分钟后可再复习；答对：按盒子间隔推迟
     const offset = correct ? `+${INTERVAL_DAYS[box]} days` : "+10 minutes";
