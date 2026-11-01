@@ -1,8 +1,8 @@
 "use client";
 import { AnimatePresence, motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Delete, HelpCircle, Keyboard, RotateCcw, Sparkles, Star, Volume2, X } from "lucide-react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowRight, Check, Delete, HelpCircle, Keyboard, RotateCcw, Sparkles, Star, Volume2, X } from "lucide-react";
 import { Button, Empty, Loading, Modal, ProgressBar } from "@/components/ui";
 import { AiExplainModal } from "@/components/AiExplainModal";
 import { api, useApi } from "@/lib/client";
@@ -305,6 +305,7 @@ function SessionInner() {
               <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">Backspace</kbd> 退格删除</div>
               <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">Tab</kbd> 获取下一个字母提示</div>
               <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">空格 Space</kbd> / <kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">R</kbd> 重新朗读发音</div>
+              <div><kbd className="px-1.5 py-0.5 font-mono font-bold bg-white text-ink rounded border border-slate-200 shadow-2xs">Enter</kbd> 拼错看完正确拼写后进入下一题</div>
             </div>
           </div>
 
@@ -971,6 +972,8 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
   const [input, setInput] = useState<string[]>([]);
   const [status, setStatus] = useState<"typing" | "correct" | "wrong">("typing");
   const [uppercase, setUppercase] = useState(false);
+  // 拼错后不自动跳过，等孩子看完正确拼写再手动进入下一题；用 ref 防止连点/长按 Enter 重复提交
+  const continuedRef = useRef(false);
 
   useEffect(() => {
     const t = setTimeout(() => speak(word.text), 180);
@@ -985,7 +988,8 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
       const ok = attempt.toLowerCase() === target.toLowerCase();
       setStatus(ok ? "correct" : "wrong");
       speak(word.text);
-      setTimeout(() => onAnswer(ok), ok ? 750 : 1600);
+      // 拼写正确：保持原来的自动跳题；拼写错误：停留在此题，由「下一题」按钮继续
+      if (ok) setTimeout(() => onAnswer(true), 750);
     },
     [chars, letterIndices, onAnswer, word.text],
   );
@@ -1012,10 +1016,28 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
     tapChar(nextTargetChar.toLowerCase());
   }, [chars, input.length, letterIndices, status, tapChar]);
 
-  // 支持外接键盘直接输入：字母键输入、Backspace 删除、Tab 提示、空格朗读
+  // 拼错后点击「下一题」/按 Enter 才继续，避免孩子还没看清正确拼写就跳到下一题
+  const goNext = useCallback(() => {
+    if (status !== "wrong" || continuedRef.current) return;
+    continuedRef.current = true;
+    onAnswer(false);
+  }, [onAnswer, status]);
+
+  // 支持外接键盘直接输入：字母键输入、Backspace 删除、Tab 提示、空格朗读；拼错后 Enter 进入下一题
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (status === "wrong") {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          goNext();
+        } else if (e.code === "Space" || e.key.toLowerCase() === "r" || e.key.toLowerCase() === "v") {
+          e.preventDefault();
+          speak(word.text);
+        }
+        return;
+      }
       if (status !== "typing") return;
 
       if (e.key === "Backspace") {
@@ -1035,7 +1057,7 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [backspace, hint, input.length, letterIndices.length, status, tapChar, word.text]);
+  }, [backspace, goNext, hint, input.length, letterIndices.length, status, tapChar, word.text]);
 
   return (
     <div className="space-y-5">
@@ -1092,7 +1114,22 @@ function SpellStep({ word, onAnswer }: { word: QueueWord; onAnswer: (ok: boolean
         </motion.div>
 
         {status === "wrong" && (
-          <div className="font-word mt-4 text-xl font-black text-coral-600">正确拼写：{word.text}</div>
+          <>
+            <div className="font-word mt-4 text-xl font-black text-coral-600">正确拼写：{word.text}</div>
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-3 w-full max-w-xs"
+            >
+              <Button variant="primary" size="lg" className="w-full" onClick={goNext}>
+                <span className="flex items-center justify-center gap-2">
+                  <span>下一题</span>
+                  <ArrowRight size={18} />
+                  <kbd className="rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-mono font-bold">Enter</kbd>
+                </span>
+              </Button>
+            </motion.div>
+          </>
         )}
       </div>
 
